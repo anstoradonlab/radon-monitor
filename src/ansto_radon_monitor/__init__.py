@@ -9,3 +9,7 @@ except DistributionNotFound:
     __version__ = "unknown"
 finally:
     del get_distribution, DistributionNotFound
+
+# from . import datastore
+# from . import main
+# from . import main_controller

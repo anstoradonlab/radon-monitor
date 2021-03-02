@@ -2,7 +2,7 @@
 
 import pytest
 
-from ansto_radon_monitor.skeleton import fib
+from ansto_radon_monitor.main import fib
 
 __author__ = "Alan Griffiths"
 __copyright__ = "Alan Griffiths"
