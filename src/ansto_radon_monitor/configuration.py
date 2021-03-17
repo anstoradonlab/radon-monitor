@@ -22,19 +22,16 @@ from ansto_radon_monitor import __version__
 
 LogLevel = typing.NewType("LogLevel", int)
 
-# TODO: replace with a list??  As recommended by argparse.
+
 DETECTOR_KIND_CHOICES = ["L100", "L200", "L1500", "L5000"]
 
+DetectorKind = typing.NewType("DetectorKind", str)
 
-class DetectorKind(Enum):
-    """
-    Types of radon detectors that we know about
-    """
-
-    L100 = 0
-    L200 = 1
-    L1500 = 2
-    L5000 = 3
+def parse_detector_kind(s: DetectorKind):
+    s = s.upper()
+    if not s in DETECTOR_KIND_CHOICES:
+        raise RuntimeError(f'Unknown kind of radon detector: {s}')
+    return s
 
 
 @dataclass
@@ -45,7 +42,7 @@ class DetectorConfig:
 
     name: str = ""
     serial_port: str = ""
-    detector_kind: DetectorKind = DetectorKind.L1500
+    detector_kind: str = ""
 
 
 @dataclass
@@ -53,7 +50,6 @@ class Configuration:
     """
     Configuration of the entire app
     """
-
     number_of_detectors: int = 1
     number_of_calibration_units: int = 1
     loglevel: LogLevel = LogLevel(logging.WARN)
@@ -69,7 +65,7 @@ def parse_config(raw_cfg):
         pathlib.Path: lambda x: pathlib.Path(x).absolute(),
         int: int,
         LogLevel: lambda x: LogLevel(logging._nameToLevel[x]),
-        DetectorKind: lambda x: DetectorKind[x],
+        DetectorKind: parse_detector_kind,
     }
 
     # create and validate the Configuration object
@@ -124,7 +120,7 @@ def get_parser():
     return parser
 
 
-def parse_args(args):
+def parse_args(args: typing.List[str]):
     """Parse command line parameters
 
     Args:
@@ -137,31 +133,22 @@ def parse_args(args):
     return parser.parse_args(args)
 
 
-def config_from_commandline(args: typing.List[str]):
+def config_from_commandline(args: typing.List[str], raw_cfg: typing.Union[dict,None]=None):
     """Load the application configuration, based on command line options
 
     Parameters
     ----------
     args : list[str]
         command line arguments
+    
+    raw_cfg : dict, optional
+        raw configuration, optional.  If present, then `raw_cfg` is used instead of reading from
+        a configuration file.
     """
 
     cmdline_args = parse_args(args)
 
-    # a dummy configuration for testing, not intended for users
-    if (
-        str(cmdline_args.configuration_file).endswith("__USE_DUMMY_INTERNAL_CONFIG")
-        and not cmdline_args.configuration_file.exists()
-    ):
-        raw_cfg = {
-            "detector_config": [
-                {"kind": "L1500", "name": "low", "port": "/dev/ttyS0"},
-                {"kind": "L1500", "name": "high", "port": "/dev/ttyS1"},
-            ],
-            "number_of_detectors": "2",
-            "loglevel": "ERROR",
-        }
-    else:
+    if raw_cfg is None:
         if cmdline_args.configuration_file.exists():
             with open(cmdline_args.configuration_file, "rt") as fd:
                 raw_cfg = yaml.safe_load(fd.read())
@@ -185,6 +172,8 @@ def config_from_commandline(args: typing.List[str]):
     # Consider moving it later, e.g. when DataStore is initialized)
     if not config.data_dir.exists():
         _logger.error(f'Data storage directory "{config.data_dir}" does not exist.')
+
+    _logger.debug(f'Configuration parsed: {config}')
 
     return config
 

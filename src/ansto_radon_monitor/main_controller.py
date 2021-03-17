@@ -11,6 +11,7 @@ import datetime
 import logging
 import math
 import os
+import sched
 import signal
 import threading
 import time
@@ -95,16 +96,6 @@ def initialize(configuration: Configuration, mode: str = "thread"):
 
     else:
         raise ValueError(f"Invalid mode: {mode}.")
-    # if thread, then call threading.Thread
-
-    # if daemon then call
-    # from daemonize import Daemonize
-    # pid = "/tmp/ansto-radon-monitor.pid"
-    # daemon = Daemonize(app="test_app", pid=pid, action=main, keep_fds=keep_fds)
-    # daemon.start()
-
-    # daemon will need to
-    pass
 
 
 class MainController(object):
@@ -125,6 +116,9 @@ class MainController(object):
         self._threads = thread_list
 
     def shutdown(self):
+        """
+        Stop all activity in threads
+        """
         _logger.debug("Asking threads to shut down.")
         for itm in self._threads:
             itm.shutdown()
@@ -135,7 +129,7 @@ class MainController(object):
 
     def terminate(self):
         """
-        Terminate the entire process (most useful if running as server)
+        Terminate the entire process (most useful if running as ICP server)
         """
         self.shutdown()
 
@@ -179,6 +173,26 @@ def round_up_time(
     # _logger.debug(f'{midnight}, {dt}, {midnight + datetime.timedelta(seconds=rounded_seconds)}')
     return midnight + datetime.timedelta(seconds=rounded_seconds)
 
+def next_interval(sec, interval, offset=0.0):
+    """calculate time when interval next expires
+
+    Parameters
+    ----------
+    sec : type returned by time.time()
+        now
+    interval : [type]
+        interval length (seconds)
+    offset : float, optional
+        offset for first interval, e.g. if interval is 10.0 and offset is 1.0,
+        the interval will expire at 11.0, 21.0, ... sec
+
+    Returns
+    -------
+    float
+        time until next interval expires
+    """
+    return math.ceil(sec/interval) * interval
+
 
 def sleep_until_multiple_of(interval):
     """try to sleep for a duration which ends on a multiple of `interval` seconds"""
@@ -200,7 +214,53 @@ def sleep_until_multiple_of(interval):
 
 
 class DataThread(threading.Thread):
-    pass
+    """
+    Base thread for data-oriented threads.  Sits in a loop and runs tasks,
+    and can be shutdown cleanly from another thread.
+    """
+    def __init__(self, datastore, *args, **kwargs):
+        kwargs["name"] = "DataLoggerThread"
+        self._datastore = datastore
+        self.cancelled = threading.Event()
+        self._tick_interval = 0.1
+        self.measurement_interval = 10  # TODO: from config
+        self.measurement_offset = 0
+        self.__done = False
+        self.__last_measurement_time = 0
+        self.__scheduler = sched.scheduler()
+        super().__init__(*args, **kwargs)
+    
+    def shutdown(self):
+        self.cancelled.set()
+
+    @property
+    def done(self):
+        return __done
+    
+    def measurement_func(self):
+        print('Measurement function executing')
+        
+    def run_measurement(self):
+        """call measurement function and schedule next"""
+        if time.time() - self.__last_measurement_time > self.measurement_interval/2.0:
+            # we're running very late, abort this measurement
+            _logger.error('Measurement skipped')
+        else:
+            self.measurement_func()
+        self.__scheduler.enterabs(next_interval(time.time(),
+                                  self.measurement_interval,
+                                  self.measurement_offset))
+    
+    def run(self):
+        while not self.cancelled:
+            time_until_next_event = self.__scheduler.run(blocking=False)
+    
+
+
+
+
+
+
 
 
 class DataLoggerThread(threading.Thread):
@@ -210,9 +270,10 @@ class DataLoggerThread(threading.Thread):
         self.alive = True
         self._tick_interval = 0.1
         self.measurement_interval = 10  # TODO: from config
+        super().__init__(*args, **kwargs)
 
-    def shutdown(self):
-        self.alive = False
+    def cancel(self):
+        self.cancelled.set()
         _logger.debug("Thread shutdown requested.")
 
     def run(self):
