@@ -15,6 +15,7 @@ import sched
 import signal
 import threading
 import time
+import copy
 
 import zerorpc
 
@@ -27,6 +28,8 @@ import sys
 _logger = logging.getLogger(__name__)
 from ansto_radon_monitor.configuration import Configuration
 from ansto_radon_monitor.datastore import DataStore
+
+from .scheduler_threads import CalibrationUnitThread, DataLoggerThread
 
 
 def setup_logging(loglevel, logfile=None):
@@ -84,7 +87,7 @@ def initialize(configuration: Configuration, mode: str = "thread"):
         # daemon ref: https://github.com/thesharp/daemonize
         process_id = os.fork()
         if process_id == 0:
-            # inside the child, start the daemon and exit
+            # inside the child, start the daemon and exit the forked process
             daemon = Daemonize(app="ansto_radon_monitor", pid=pid, action=ipc_server)
             daemon.start()
 
@@ -100,15 +103,26 @@ def initialize(configuration: Configuration, mode: str = "thread"):
 
 class MainController(object):
 
-    # TODO: write app options class and pass it here
-    def __init__(self, app_options=None):
-        self.datastore = DataStore()
+    def __init__(self, configuration: Configuration):
+        self.datastore = DataStore(configuration.data_dir)
+        self._configuration = configuration
         self._start_threads()
 
     def _start_threads(self):
         thread_list = []
-        self._cal_system_task = CalSystemThread(datastore=self.datastore)
+        # calibration unit
+        self._cal_system_task = CalibrationUnitThread(
+            labjack_id=self._configuration.labjack_id, datastore=self.datastore
+        )
         thread_list.append(self._cal_system_task)
+
+        # radon detector(s)
+        for ii, detector_config in enumerate(self._configuration.detector_config):
+            _logger.info(f"Setting up thread for detector {ii}")
+            # note: poll the datalogger late (2 second measurement offset), so that it has a chance to update it's internal table
+            # before being asked for data.
+            t = DataLoggerThread(detector_config, datastore=self.datastore, measurement_offset=2)
+            thread_list.append(t)
 
         for itm in thread_list:
             itm.start()
@@ -122,6 +136,8 @@ class MainController(object):
         _logger.debug("Asking threads to shut down.")
         for itm in self._threads:
             itm.shutdown()
+        _logger.debug("Shutting down datastore.")
+        self.datastore.shutdown()
         _logger.debug("Waiting for threads...")
         for itm in self._threads:
             itm.join()
@@ -147,196 +163,60 @@ class MainController(object):
         t.start()
         return "Ok - exiting in 10 sec"
 
+    def get_rows(self, table, start_time=None):
+        """return the data from a data table, optionally just the
+           data newer than `reference_time`
 
-def round_up_time(
-    dt: datetime.datetime = None, round_to: float = 60
-) -> datetime.datetime:
-    """Round a datetime up to the nearest interval of `round_to` seconds
-
-    Parameters
-    ----------
-    dt : datetime.datetime, optional
-        datetime to round, by default None (use the current time if None)
-    round_to : float, optional
-        Number of seconds, by default 60
-
-    Returns
-    -------
-    datetime.datetime
-        Rounded time
-    """
-    if dt is None:
-        dt = datetime.datetime.utcnow()
-    midnight = dt.replace(hour=0, minute=0, second=0, microsecond=0)
-    seconds_since_midnight = (dt - midnight).total_seconds()
-    rounded_seconds = math.ceil(seconds_since_midnight / round_to) * round_to
-    # _logger.debug(f'{midnight}, {dt}, {midnight + datetime.timedelta(seconds=rounded_seconds)}')
-    return midnight + datetime.timedelta(seconds=rounded_seconds)
-
-def next_interval(sec, interval, offset=0.0):
-    """calculate time when interval next expires
-
-    Parameters
-    ----------
-    sec : type returned by time.time()
-        now
-    interval : [type]
-        interval length (seconds)
-    offset : float, optional
-        offset for first interval, e.g. if interval is 10.0 and offset is 1.0,
-        the interval will expire at 11.0, 21.0, ... sec
-
-    Returns
-    -------
-    float
-        time until next interval expires
-    """
-    return math.ceil(sec/interval) * interval
-
-
-def sleep_until_multiple_of(interval):
-    """try to sleep for a duration which ends on a multiple of `interval` seconds"""
-    now = datetime.datetime.utcnow()
-    wake_time = round_up_time(now, interval)
-    sleep_duration = (wake_time - now).total_seconds()
-    if sleep_duration < interval / 2.0:
-        sleep_duration += interval
-    if sleep_duration < interval / 2.0 or interval * 1.01 < interval:
-        _logger.error(
-            f"Unexpected sleep duration {sleep_duration}, setting to {interval}"
-        )
-        sleep_duration = interval
-    # _logger.debug(f'Sleeping for {sleep_duration}sec')
-    time.sleep(sleep_duration)
-
-
-# TODO: move common features to a base class
-
-
-class DataThread(threading.Thread):
-    """
-    Base thread for data-oriented threads.  Sits in a loop and runs tasks,
-    and can be shutdown cleanly from another thread.
-    """
-    def __init__(self, datastore, *args, **kwargs):
-        kwargs["name"] = "DataLoggerThread"
-        self._datastore = datastore
-        self.cancelled = threading.Event()
-        self._tick_interval = 0.1
-        self.measurement_interval = 10  # TODO: from config
-        self.measurement_offset = 0
-        self.__done = False
-        self.__last_measurement_time = 0
-        self.__scheduler = sched.scheduler()
-        super().__init__(*args, **kwargs)
-    
-    def shutdown(self):
-        self.cancelled.set()
-
-    @property
-    def done(self):
-        return __done
-    
-    def measurement_func(self):
-        print('Measurement function executing')
-        
-    def run_measurement(self):
-        """call measurement function and schedule next"""
-        if time.time() - self.__last_measurement_time > self.measurement_interval/2.0:
-            # we're running very late, abort this measurement
-            _logger.error('Measurement skipped')
-        else:
-            self.measurement_func()
-        self.__scheduler.enterabs(next_interval(time.time(),
-                                  self.measurement_interval,
-                                  self.measurement_offset))
-    
-    def run(self):
-        while not self.cancelled:
-            time_until_next_event = self.__scheduler.run(blocking=False)
-    
-
-
-
-
-
-
-
-
-class DataLoggerThread(threading.Thread):
-    def __init__(self, datastore, *args, **kwargs):
-        kwargs["name"] = "DataLoggerThread"
-        self._datastore = datastore
-        self.alive = True
-        self._tick_interval = 0.1
-        self.measurement_interval = 10  # TODO: from config
-        super().__init__(*args, **kwargs)
-
-    def cancel(self):
-        self.cancelled.set()
-        _logger.debug("Thread shutdown requested.")
-
-    def run(self):
-        _logger.debug("Started cal system control thread.")
-        # TODO: replace self.alive with a threading.Event
-        while self.alive:
-            self.maybe_take_sample()
-            sleep_until_multiple_of(self._tick_interval)
-
-        _logger.debug("Stopping cal system control thread.")
-
-
-# TODO: handle INT (ctrl-C) signal (https://www.cloudcity.io/blog/2019/02/27/things-i-wish-they-told-me-about-multiprocessing-in-python/)
-
-
-class CalSystemThread(threading.Thread):
-    def __init__(self, datastore, *args, **kwargs):
-        kwargs["name"] = "CalSystemThread"
-        self._datastore = datastore
-        self.alive = True
-        # TODO: maybe replace with priority queue?
-        # TODO: or a scheduler https://docs.python.org/3/library/sched.html
-        self.scheduled_tasks = []
-        self._tick_interval = 0.1
-        self.measurement_interval = 10  # TODO: from config
-        self._last_measurement_time = None
-        self._measurement_due = None
-        super().__init__(*args, **kwargs)
-
-    def shutdown(self):
-        self.alive = False
-        _logger.debug("Thread shutdown requested.")
-
-    def take_sample(self):
-        """Take sample from the cal system immediately"""
-        data = {"time": datetime.datetime.utcnow(), "state": "open"}
-        return data
-
-    def maybe_take_sample(self):
-        """grab the state from the cal system, if it's time
-        
-        Notes: manages `_last_measurement_time` and `_measurement_due`
+        Parameters
+        ----------
+        table : [type]
+            [description]
+        reference_time : [type]
+            [description]
         """
-        if self._measurement_due is None:
-            self._measurement_due = round_up_time(round_to=self.measurement_interval)
-            _logger.debug(f"Setting first measurement time to {self._measurement_due}.")
-            return
+        t, data = self.datastore.get_rows(table, start_time)
+        return t, copy.deepcopy(data)
+    
+    def list_tables(self):
+        return self.datastore.tables
 
-        t = datetime.datetime.utcnow()
-        if t >= self._measurement_due:
-            sample = self.take_sample()
-            _logger.debug("Sample acquired from cal system.")
-            self._last_measurement_time = self._measurement_due
-            self._measurement_due += datetime.timedelta(
-                seconds=self.measurement_interval
-            )
-            self._datastore.add_record("cal_system", sample)
 
-    def run(self):
-        _logger.debug("Started cal system control thread.")
-        # TODO: replace self.alive with a threading.Event
-        while self.alive:
-            self.maybe_take_sample()
-            sleep_until_multiple_of(self._tick_interval)
+    def get_status(self):
+        """
+        return a tree of status information
+        """
+        # TODO: read status information from threads
+        status = {'Detector 0': {'Datalogger': 'connected'} ,
+                  'Cal unit': {'Mode': 'Normal operation'},
+                  'Pending tasks': {'1999-31-21 23:59':'Fix y2k bug'}}
+                                 
+        return status
+    
+    def get_job_queue(self):
+        """
+        return a list of pending jobs
+        """
+        ret = ""
+        for t in self._threads:
+            ret += '\n' + t.name + '\n'
+            try:
+                ret += t.status + '\n  '
+            except:
+                ret += "[[no status message, t.status]]\n  "
+            ret += '\n  '.join(t.task_queue)
+            
+        return ret
+    
+    def get_log_messages(self, start_time=None):
+        """
+        get all of the log messages stored since start_time
+        """
+        t = None
+        return t, "Log messages not yet available"
 
-        _logger.debug("Stopping cal system control thread.")
+
+    def run_calibration(self, flush_duration=10*3600, inject_duration=5*3600, radon_detector=0, start_time=None):
+        self._cal_system_task.run_calibration(flush_duration, inject_duration, start_time=None)
+    
+    def run_background(self, duration=12*3600, start_time=None):
+        self._cal_system_task.run_background(duration, start_time=None)

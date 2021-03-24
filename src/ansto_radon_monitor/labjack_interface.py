@@ -6,10 +6,10 @@ import u12
 _logger = logging.getLogger(__name__)
 
 # reference for Labjack interface:
-# 
+#
 
 
-class LabjackWrapper():
+class LabjackWrapper:
     """Wrapper for the labjack interface.
 
     Purpose is to provide a specialized version of the interface, which only includes
@@ -18,34 +18,35 @@ class LabjackWrapper():
     Only DIO ports 0-5 are used in our setup.
 
     """
+
     def __init__(self, labjack_id=-1):
         self.device = u12.U12(id=labjack_id, debug=False)
         self.max_channel = 5
         self.reset_dio()
-    
+
     def reset_dio(self):
         """Sets output to zero on all channels while also configuring all DIO channels as output"""
         d = self.device
-        for ii in range(self.max_channel+1):
+        for ii in range(self.max_channel + 1):
             ret = d.eDigitalOut(ii, 0)
 
     def set_dio(self, channel, state):
         """Set one DIO channel to 1 or 0"""
-        
+
         d = self.device
-        ret =  d.eDigitalOut(channel, state)
+        ret = d.eDigitalOut(channel, state)
         # TODO: raise an exception instead (may have lost connection to labjack)
-        assert(ret['idnum'] == d.id)
-        
+        assert ret["idnum"] == d.id
+
     @property
     def dio_states(self):
         raise NotImplementedError
-        
+
         # this would have the side-effect of setting all channels to input
         # if this function is needed, it will need to use rawDIO on linux, digitialIO on
         # windows
         # refer to https://labjack.com/forums/u12/liblabjackusbso-undefined-symbol-digitalio
-    
+
     @property
     def analogue_states(self):
         d = self.device
@@ -55,15 +56,16 @@ class LabjackWrapper():
             # what to do if overVoltage??
             # this is indicated by a_in["overVoltage"]
             # TODO: log as error
-            values.append(a_in['voltage'])
-            assert(a_in['idnum'] == d.id)
-        
+            values.append(a_in["voltage"])
+            assert a_in["idnum"] == d.id
+
         return values
 
 
-class CalBoxLabjack():
+class CalBoxLabjack:
     """Hardware interface for the labjack inside our Cal Box.
     """
+
     def __init__(self, labjack_id=-1):
         """Interface for the labjack, as it is installed in our pumped Cal Box
 
@@ -133,6 +135,10 @@ class CalBoxLabjack():
 
     def start_background(self):
         """Put detector in background mode"""
+        if self.digital_output_state["activate_inject"] == True:
+            _logger.warning(
+                "Switching directly from inject to background: a surprisingly high background is likely."
+            )
         self.digital_output_state["activate_pump"] = False
         self.digital_output_state["activate_inject"] = False
         self.digital_output_state["activate_cutoff_valve"] = True
@@ -151,25 +157,57 @@ class CalBoxLabjack():
 
     @property
     def analogue_states(self):
+        channels_dict = {}
         if self.no_hardware_mode:
-            return [math.nan, math.nan]
+            for k in self.analogue_input_channel:
+                channels_dict[k] = math.nan
         else:
-            return self.lj.analogue_states
-
+            voltages = self.lj.analogue_states
+            for k in self.analogue_input_channel:
+                channels_dict[k] = voltages[self.analogue_input_channel[k]]
+        return channels_dict
 
     def _send_state_to_device(self):
         if not self.no_hardware_mode:
             settings = []
-            for k,state in self.digital_output_state.items():
+            for k, state in self.digital_output_state.items():
                 channel = self.digital_output_channel[k]
                 self.lj.set_dio(channel, state)
-                settings.append((channel,state))
-            _logger.debug(f"Labjack digital output ports set: {self.digital_output_state.items()}")
+                settings.append((channel, state))
+            _logger.debug(
+                f"Labjack digital output ports set: {self.digital_output_state.items()}"
+            )
         else:
             _logger.debug("Labjack interface running in no-hardware mode.")
 
+    @property
+    def status(self):
+        """generate a human-readable status message based on DIO flags"""
+        flags = [
+            self.digital_output_state["activate_pump"],
+            self.digital_output_state["activate_inject"],
+            self.digital_output_state["activate_cutoff_valve"],
+            self.digital_output_state["disable_stack_blower"],
+            self.digital_output_state["disable_external_blower"],
+            self.digital_output_state["disable_internal_blower"],
+        ]
+        if flags == [False, False, False, False, False, False]:
+            s = "Normal operation"
+        elif flags == [True, False, False, False, False, False]:
+            s = "Flushing source"
+        elif flags == [True, True, False, False, False, False]:
+            s = "Injecting from source"
+        elif flags == [False, False, True, True, True, True]:
+            s = "Performing background"
+        elif flags == [True, False, True, True, True, True]:
+            s = "Flushing source and performing background"
+        else:
+            s = "Unexpected DIO state: {flags}"
+        return s
+
 
 if __name__ == "__main__":
+
     def setup_logging(loglevel, logfile=None):
         """Setup basic logging
 
@@ -179,14 +217,18 @@ if __name__ == "__main__":
         # logformat = "[%(asctime)s] %(levelname)s:%(name)s:%(message)s"
         logformat = "[%(levelname)1.1s %(asctime)s %(module)s:%(lineno)d %(threadName)s] %(message)s"
         logging.basicConfig(
-            level=loglevel, stream=sys.stdout, format=logformat, datefmt="%Y-%m-%d %H:%M:%S"
+            level=loglevel,
+            stream=sys.stdout,
+            format=logformat,
+            datefmt="%Y-%m-%d %H:%M:%S",
         )
 
     import sys
+
     setup_logging(logging.DEBUG)
 
     for ljid in [-1, None]:
-        print(f'Running with labjack ID {ljid}')
+        print(f"Running with labjack ID {ljid}")
         lj = CalBoxLabjack(ljid)
         lj.reset_all()
 
@@ -198,4 +240,4 @@ if __name__ == "__main__":
         lj.start_background()
         lj.reset_all()
 
-        print(f'Analogue channel voltages: {lj.analogue_states}')
+        print(f"Analogue channel voltages: {lj.analogue_states}")

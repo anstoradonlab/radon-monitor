@@ -36,7 +36,6 @@ def task_description(description_text):
     return desc_decorator
 
 
-
 def next_interval(sec, interval, offset=0.0):
     """calculate time when interval next expires
 
@@ -67,7 +66,7 @@ class DataThread(threading.Thread):
     def __init__(
         self,
         datastore,
-        run_measurement_on_startup=True,
+        run_measurement_on_startup=False,
         measurement_interval=10,
         measurement_offset=0,
         *args,
@@ -84,6 +83,7 @@ class DataThread(threading.Thread):
         self._done = False
         self._last_measurement_time = 0
         self._scheduler = sched.scheduler(time.time, time.sleep)
+        self._lock = threading.RLock()
         now = time.time()
         delay = next_interval(now, self.measurement_interval, self.measurement_offset)
         _logger.debug(f"next time: {delay+now} (next - now : {delay})")
@@ -125,8 +125,9 @@ class DataThread(threading.Thread):
             except AttributeError:
                 desc = str(task.action)
             return f"{t} {desc}"
-
-        return [task_to_readable(itm) for itm in self._scheduler.queue]
+        with self._lock:
+            ret = [task_to_readable(itm) for itm in self._scheduler.queue]
+        return ret
 
     @property
     def seconds_until_next_measurement(self):
@@ -134,7 +135,7 @@ class DataThread(threading.Thread):
         delay = next_interval(now, self.measurement_interval, self.measurement_offset)
         return delay
 
-    @task_description("Run a measurement")
+    @task_description("Poll the measurement hardware")
     def run_measurement(self):
         """call measurement function and schedule next"""
         self.measurement_func()
@@ -177,104 +178,210 @@ class DataThread(threading.Thread):
 
 
 class CalibrationUnitThread(DataThread):
-    def __init__(self, labjack, *args, **kwargs):
+    def __init__(self, labjack_id, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.name = "CalibrationUnitThread"
-        self._labjack = labjack
-        self.status = 'Normal operation'
-
+        self._labjack = CalBoxLabjack(labjack_id)
+        self._data_table_name = "cal"
+        # task priority is used to identify tasks later, so that
+        # pending cal and background can be cancelled by the user
+        self._calibration_tasks_priority = 10
+        self._background_tasks_priority = 15
 
     @task_description("Calibration unit: flush source")
     def set_flush_state(self):
-        self.digital_output_state["activate_pump"] = True
-        self.digital_output_state["activate_inject"] = False
-
-        self._send_state_to_device()
+        self._labjack.flush()
 
     @task_description("Calibration unit: inject from source")
     def set_inject_state(self):
         self._labjack.inject()
 
+    @task_description("Calibration unit: inject from source")
+    def set_background_state(self):
+        self._labjack.start_background()
+
     @task_description("Calibration unit: return to idle")
     def set_default_state(self):
         self._labjack.reset()
 
+    @task_description("Calibration unit: cancel background")
+    def cancel_background(self):
+        self._labjack.reset_background()
+        # TODO: handle case when source is still flushing
+
     def measurement_func(self):
-        # check the state matches the class's state
-        # set the state on the instrument matches (log an error if not)
-        # measure stats
-        # send measurement to datastore
-        
         t = datetime.datetime.utcnow()
         t = t.replace(microsecond=0)
-        data = copy.deepcopy(self._labjack.digital_output_state)
-        data['ch0','ch1'] = self._labjack.analogue_states
-        data['Datetime'] = t
-
-        self._datastore.add_record(data)
+        data = {"Datetime": t}
+        data.update(copy.deepcopy(self._labjack.digital_output_state))
+        data.update(self._labjack.analogue_states)
+        data["status"] = self.status
+        # send measurement to datastore
+        self._datastore.add_record(self._data_table_name, data)
 
     @task_description("Calibration unit: measure state")
     def run_measurement(self):
-        """call measurement function and schedule next"""
-        self.measurement_func()
-        self._scheduler.enter(
-            delay=self.seconds_until_next_measurement,
-            priority=0,
-            action=self.run_measurement,
-        )
+        """call measurement function and schedule next
+        
+        If measurement is due at the same time as an action, perform the action first"""
+        with self._lock:
+            self.measurement_func()
+            self._scheduler.enter(
+                delay=self.seconds_until_next_measurement,
+                priority=100,
+                action=self.run_measurement,
+            )
 
     def run_calibration(self, flush_duration, inject_duration, start_time=None):
+        """Run the calibration sequence - flush source, inject source
 
-        calibration_tasks_priority = 10
+        Parameters
+        ----------
+        flush_duration : float
+            duration of flushing period (sec)
+        inject_duration : float
+            duration of inject period (sec)
+        start_time : datetime.datetie or None, optional
+            time when flushing is due to start (UTC), or None (which means to start
+            immediately), by default None
+        """
 
-        # begin flushing immediately
+        _logger.debug(f'run_calibration, parameters are flush_duration:{flush_duration}, inject_duration:{inject_duration}, start_time:{start_time}')
+
+        p = self._calibration_tasks_priority
+        if start_time is not None:
+            initial_delay_seconds = max(
+                0, (start_time - datetime.datetime.utcnow()).total_seconds()
+            )
+        else:
+            initial_delay_seconds = 0
+        #
+        # begin flushing
         self._scheduler.enter(
-            delay=0,
-            priority=calibration_tasks_priority,
-            action=self.set_flush_state,
+            delay=initial_delay_seconds, priority=p, action=self.set_flush_state,
         )
         # start calibration *on* the half hour
-        sec_per_30min = 30*60
+        sec_per_30min = 30 * 60
         now = time.time()
-        delay_inject_start = next_interval(now + flush_duration, sec_per_30min) + flush_duration
-        self._scheduler.enter(
-            delay=delay_inject_start,
-            priority=calibration_tasks_priority,
-            action=self.set_inject_state,
+        # allow some wiggle room - if flush_duration will take us up to a few seconds past the half
+        # hour, just reduce flush_duration by a bit instead of postponing by another half hour
+        # this might happen if we're running the scheduler on the half hour
+        wiggle_room = 10
+        delay_inject_start = (
+            next_interval(now + flush_duration - wiggle_room, sec_per_30min)
+            + flush_duration
+            - wiggle_room
         )
+        # reset the background flags
+        self._scheduler.enter(
+            delay=delay_inject_start, priority=p, action=self.cancel_background,
+        )
+        # and start injection (at the same time)
+        self._scheduler.enter(
+            delay=delay_inject_start, priority=p, action=self.set_inject_state,
+        )
+
         # stop injection
         delay_inject_stop = delay_inject_start + inject_duration
         self._scheduler.enter(
-            delay=delay_inject_stop,
-            priority=calibration_tasks_priority,
-            action=self.set_default_state,
+            delay=delay_inject_stop, priority=p, action=self.set_default_state,
         )
 
         self.state_changed.set()
 
+    def run_background(self, duration, start_time=None):
+        """Run the calibration sequence - flush source, inject source
 
-    def cancel_calibration(self):
-        calibration_tasks_priority = 10
-        tasks_to_remove = [itm for itm in self._scheduler.queue if itm.priority == calibration_tasks_priority]
-        for itm in tasks_to_remove:
-            self._scheduler.cancel(itm)
-        
+        Parameters
+        ----------
+        duration : float
+            duration of background period (sec)
+        start_time : datetime.datetie or None, optional
+            time when flushing is due to start (UTC), or None (which means to start
+            immediately), by default None
+        """
+
+        p = self._background_tasks_priority
+        if start_time is not None:
+            initial_delay_seconds = max(
+                0, (start_time - datetime.datetime.utcnow()).total_seconds()
+            )
+        else:
+            initial_delay_seconds = 0
+        #
+        # begin background
+        self._scheduler.enter(
+            delay=initial_delay_seconds, priority=p, action=self.set_background_state,
+        )
+        # reset the background flags
+        self._scheduler.enter(
+            delay=initial_delay_seconds + duration,
+            priority=p,
+            action=self.cancel_background,
+        )
+
         self.state_changed.set()
 
-    def get_calibration_status(self):
-        pass
+    @task_description("Calibration unit: measure state")
+    def cancel_calibration(self):
+        """cancel an in-progress calibration and all pending ones"""
+        tasks_to_remove = [
+            itm
+            for itm in self._scheduler.queue
+            if itm.priority == self._calibration_tasks_priority
+        ]
+        for itm in tasks_to_remove:
+            self._scheduler.cancel(itm)
+
+        # schedule a task to reset the cal box
+        self._scheduler.enter(
+            delay=0, priority=0, action=self.set_default_state,
+        )
+
+        self.state_changed.set()
+
+    @property
+    def status(self):
+        return self._labjack.status
 
 
+def fix_record(record):
+    """fix a record from cr1000"""
+    r = {}
+    for k,v in record.items():
+        # work around (possible but not observed) problem
+        # of bytes being used as key
+        try:
+            new_k = k.decode()
+        except (UnicodeDecodeError, AttributeError):
+            new_k = str(k)
+        # work around problem of cr1000 converting to strings like
+        # "b'RelHum_Avg'"
+        if k.startswith("b'") and k.endswith("'"):
+            new_k = k[2:-1]
+        r[new_k] = v
+    return r
 
-class DataLoggerThread(threading.Thread):
-    def __init__(self, datalogger_port, *args, **kwargs):
-        kwargs["name"] = "DataLoggerThread"
-        self.measurement_interval = 5  # TODO: from config?, this is in seconds
-        self._datalogger = CR1000.from_url(datalogger_port, timeout=10)
-        self.tables = [str(itm, 'ascii') for itm in self._datalogger.get_tables()]
+
+class DataLoggerThread(DataThread):
+    def __init__(self, datalogger_config, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.measurement_interval = 5  # TODO: from config?, this is in seconds
+        self._config = datalogger_config
+        self._datalogger = CR1000.from_url(datalogger_config.serial_port, timeout=2)
+        self.tables = [str(itm, "ascii") for itm in self._datalogger.list_tables()]
+        self.name = "DataLoggerThread"
+
 
     def measurement_func(self):
-        
-        for k in self.tables:
-            update_time = self._datastore
+
+        for table_name in self.tables:
+            update_time = self._datastore.get_update_time(table_name) + datetime.timedelta(
+                seconds=1
+            )
+            data = self._datalogger.get_data(table_name, start_date=update_time)
+
+            if len(data) > 0:
+                _logger.debug(f"Received data ({len(data)} records) from table {table_name}.")
+                for itm in data:
+                    self._datastore.add_record(table_name, fix_record(itm))

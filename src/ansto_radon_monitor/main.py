@@ -21,8 +21,7 @@ import sys
 import time
 
 from ansto_radon_monitor import __version__
-from ansto_radon_monitor.configuration import (Configuration,
-                                               config_from_commandline)
+from ansto_radon_monitor.configuration import Configuration, config_from_commandline
 from ansto_radon_monitor.datastore import DataStore
 from ansto_radon_monitor.main_controller import MainController, initialize
 
@@ -33,7 +32,7 @@ __license__ = "mit"
 _logger = logging.getLogger(__name__)
 
 
-def setup_logging(loglevel):
+def setup_logging(loglevel=logging.DEBUG):
     """Setup basic logging
 
     Args:
@@ -44,6 +43,18 @@ def setup_logging(loglevel):
     logging.basicConfig(
         level=loglevel, stream=sys.stdout, format=logformat, datefmt="%Y-%m-%d %H:%M:%S"
     )
+
+    # exclude messages for Pylink and Pycr1000
+    class Blacklist(logging.Filter):
+        def __init__(self):
+            self.blacklist = ["pycampbellcr1000", "pylink"]
+
+        def filter(self, record):
+            """return True to keep message"""
+            return not record.name in self.blacklist
+
+    for handler in logging.root.handlers:
+        handler.addFilter(Blacklist())
 
 
 def main(args):

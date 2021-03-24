@@ -27,10 +27,11 @@ DETECTOR_KIND_CHOICES = ["L100", "L200", "L1500", "L5000"]
 
 DetectorKind = typing.NewType("DetectorKind", str)
 
+
 def parse_detector_kind(s: DetectorKind):
     s = s.upper()
     if not s in DETECTOR_KIND_CHOICES:
-        raise RuntimeError(f'Unknown kind of radon detector: {s}')
+        raise RuntimeError(f"Unknown kind of radon detector: {s}")
     return s
 
 
@@ -50,12 +51,14 @@ class Configuration:
     """
     Configuration of the entire app
     """
+
     number_of_detectors: int = 1
     number_of_calibration_units: int = 1
     loglevel: LogLevel = LogLevel(logging.WARN)
     pid_file: pathlib.Path = pathlib.Path("/tmp/ansto_radon_monitor.pid")
     detector_config: typing.List[DetectorConfig] = field(default_factory=list)
     data_dir: pathlib.Path = pathlib.Path(".", "data").absolute()
+    labjack_id: int = -1
 
 
 def parse_config(raw_cfg):
@@ -133,7 +136,9 @@ def parse_args(args: typing.List[str]):
     return parser.parse_args(args)
 
 
-def config_from_commandline(args: typing.List[str], raw_cfg: typing.Union[dict,None]=None):
+def config_from_commandline(
+    args: typing.List[str], raw_cfg: typing.Union[dict, None] = None
+):
     """Load the application configuration, based on command line options
 
     Parameters
@@ -170,10 +175,12 @@ def config_from_commandline(args: typing.List[str], raw_cfg: typing.Union[dict,N
     # validate configuration
     # (doing this early seems helpful, but may not be ideal in some respects.
     # Consider moving it later, e.g. when DataStore is initialized)
-    if not config.data_dir.exists():
-        _logger.error(f'Data storage directory "{config.data_dir}" does not exist.')
+    # if not config.data_dir.exists():
+    #    _logger.error(f'Data storage directory "{config.data_dir}" does not exist.')
 
-    _logger.debug(f'Configuration parsed: {config}')
+    # TODO: get logging working from this function
+    print(f"Configuration parsed: {config}")
+    _logger.debug(f"Configuration parsed: {config}")
 
     return config
 
