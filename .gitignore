@@ -49,3 +49,6 @@ MANIFEST
 
 # Per-project virtualenvs
 .venv*/
+
+# Data folder, created when app runs
+data/

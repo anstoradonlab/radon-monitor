@@ -196,17 +196,18 @@ class CalibrationUnitThread(DataThread):
     def set_inject_state(self):
         self._labjack.inject()
 
-    @task_description("Calibration unit: inject from source")
+    @task_description("Calibration unit: switch to background state")
     def set_background_state(self):
         self._labjack.start_background()
 
     @task_description("Calibration unit: return to idle")
     def set_default_state(self):
-        self._labjack.reset()
+        self._labjack.reset_all()
 
     @task_description("Calibration unit: cancel background")
     def cancel_background(self):
-        self._labjack.reset_background()
+        #self._labjack.reset_background()
+        self._labjack.reset_all()
         # TODO: handle case when source is still flushing
 
     def measurement_func(self):

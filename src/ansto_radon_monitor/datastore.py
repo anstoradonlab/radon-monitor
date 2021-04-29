@@ -263,7 +263,7 @@ class DataStore(object):
             self.__data[table].append(data)
             if len(self.__data[table]) > self.max_elements:
                 # TODO: move this down to Table
-                n = len(self.__data[table] - self.max_elements)
+                n = len(self.__data[table]) - self.max_elements
                 self.__data[table] = self.__data[table][n:]
 
             self.tstore.store_row(table, data)

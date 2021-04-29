@@ -220,3 +220,9 @@ class MainController(object):
     
     def run_background(self, duration=12*3600, start_time=None):
         self._cal_system_task.run_background(duration, start_time=None)
+    
+    def stop_calibration(self):
+        self._cal_system_task.set_default_state()
+
+    def stop_background(self):
+        self._cal_system_task.cancel_background()
