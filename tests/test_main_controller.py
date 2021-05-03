@@ -7,6 +7,7 @@ import logging
 import time
 import yaml
 import tempfile
+import pprint
 from ansto_radon_monitor.configuration import (
     parse_config,
     parse_args,
@@ -50,11 +51,16 @@ def test_main_controller(temp_directory):
     ctl = initialize(config, mode="thread")
     print("init done.")
     time.sleep(1)
-    print(ctl.get_status())
+    pprint.pprint(ctl.get_status())
 
     time.sleep(10)
 
     ctl.run_calibration()
+
+    time.sleep(10)
+
+    pprint.pprint(ctl.get_status())
+
     ctl.stop_calibration()
     ctl.run_background()
     ctl.stop_background()

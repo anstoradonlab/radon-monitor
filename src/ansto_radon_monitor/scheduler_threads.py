@@ -122,12 +122,13 @@ class DataThread(threading.Thread):
             t = time_to_text(task.time)
             try:
                 desc = task.action.description
+                return f"{t} {desc}"
             except AttributeError:
-                desc = str(task.action)
-            return f"{t} {desc}"
+                return None
 
         with self._lock:
             ret = [task_to_readable(itm) for itm in self._scheduler.queue]
+            ret = [itm for itm in ret if not itm is None]
         return ret
 
     @property
@@ -196,6 +197,10 @@ class CalibrationUnitThread(DataThread):
 
     @task_description("Calibration unit: inject from source")
     def set_inject_state(self):
+        # cancel background - so that we are not injecting
+        # while flow is turned off (which would lead to a very
+        # high radon concentration in the detector)
+        self._labjack.cancel_background()
         self._labjack.inject()
 
     @task_description("Calibration unit: switch to background state")
@@ -208,9 +213,8 @@ class CalibrationUnitThread(DataThread):
 
     @task_description("Calibration unit: cancel background")
     def cancel_background(self):
-        # self._labjack.reset_background()
-        self._labjack.reset_all()
-        # TODO: handle case when source is still flushing
+        self._labjack.reset_background()
+        #self._labjack.reset_all()
 
     def measurement_func(self):
         t = datetime.datetime.utcnow()
@@ -278,11 +282,8 @@ class CalibrationUnitThread(DataThread):
             + flush_duration
             - wiggle_room
         )
-        # reset the background flags
-        self._scheduler.enter(
-            delay=delay_inject_start, priority=p, action=self.cancel_background,
-        )
-        # and start injection (at the same time)
+        
+        # start injection
         self._scheduler.enter(
             delay=delay_inject_start, priority=p, action=self.set_inject_state,
         )
@@ -388,11 +389,12 @@ class DataLoggerThread(DataThread):
         tables_to_use = ["Results", "RTV"]
         self.tables = [itm for itm in self.tables if itm in tables_to_use]
         self.name = "DataLoggerThread"
-        self.status = "Connected"
+        self.detectorName = datalogger_config.name
+        self.status = {'Datalogger': 'connected'}
 
     def measurement_func(self):
         # TODO: handle lost connection
-        self.status = "Retrieving data from datalogger"
+        self.status['Datalogger'] = 'retrieving data'
         with self._lock:
             for table_name in self.tables:
                 destination_table_name = self._config.name + "-" + table_name
@@ -416,3 +418,4 @@ class DataLoggerThread(DataThread):
                             self._datastore.add_record(
                                 destination_table_name, fix_record(itm)
                             )
+        self.status['Datalogger'] = 'connected'

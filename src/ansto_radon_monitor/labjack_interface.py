@@ -15,12 +15,18 @@ class LabjackWrapper:
     Purpose is to provide a specialized version of the interface, which only includes
     the functions needed for our calibration system.
 
+    There are multiple APIs to access the LabJack, so the use of this wrapper means
+    that we'll be able to sitch later if needed.
+
     Only DIO ports 0-5 are used in our setup.
 
     """
 
-    def __init__(self, labjack_id=-1):
-        self.device = u12.U12(id=labjack_id, debug=False)
+    def __init__(self, labjack_id=-1, serialNumber=None):
+        if serialNumber is not None:
+            self.device = u12.U12(debug=False, serialNumber=serialNumber)
+        else:
+            self.device = u12.U12(id=labjack_id, debug=False)
         self.max_channel = 5
         self.reset_dio()
 
@@ -66,7 +72,7 @@ class CalBoxLabjack:
     """Hardware interface for the labjack inside our Cal Box.
     """
 
-    def __init__(self, labjack_id=-1):
+    def __init__(self, labjack_id=-1, serialNumber=None):
         """Interface for the labjack, as it is installed in our pumped Cal Box
 
         Parameters
@@ -77,10 +83,13 @@ class CalBoxLabjack:
                 * `-1`: connect to whichever labjack we can find
                 * `None`: don't connect to a labjack, but run anyway (this is 
                   for testing without access to a labjack)
+        
+        serialNumber : option
+            If provided, this is the serial number of the labjack to connect to
         """
         self.no_hardware_mode = True
         if labjack_id is not None:
-            self.lj = LabjackWrapper(labjack_id)
+            self.lj = LabjackWrapper(labjack_id, serialNumber=serialNumber)
             self.no_hardware_mode = False
 
         self._init_flags()
@@ -117,6 +126,10 @@ class CalBoxLabjack:
 
     def inject(self):
         """Inject radon from source"""
+        if self.digital_output_state["disable_internal_blower"] == True:
+            _logger.warning(
+                "Switching directly from background to inject: background may have been terminated early."
+            )
         self.digital_output_state["activate_pump"] = True
         self.digital_output_state["activate_inject"] = True
         self.digital_output_state["activate_cutoff_valve"] = False
@@ -139,7 +152,6 @@ class CalBoxLabjack:
             _logger.warning(
                 "Switching directly from inject to background: a surprisingly high background is likely."
             )
-        self.digital_output_state["activate_pump"] = False
         self.digital_output_state["activate_inject"] = False
         self.digital_output_state["activate_cutoff_valve"] = True
         self.digital_output_state["disable_stack_blower"] = True
@@ -147,6 +159,17 @@ class CalBoxLabjack:
         self.digital_output_state["disable_internal_blower"] = True
         _logger.info(f"Cal Box entered background mode")
         self._send_state_to_device()
+
+    def reset_background(self):
+        """Cancel a running background (but leave source flushing if it already is running)
+        """
+        self.digital_output_state["activate_cutoff_valve"] = False
+        self.digital_output_state["disable_stack_blower"] = False
+        self.digital_output_state["disable_external_blower"] = False
+        self.digital_output_state["disable_internal_blower"] = False
+        _logger.info(f"Cal Box entered background mode")
+        self._send_state_to_device()
+
 
     def reset_all(self):
         """return to idle state"""
@@ -203,7 +226,13 @@ class CalBoxLabjack:
             s = "Flushing source and performing background"
         else:
             s = "Unexpected DIO state: {flags}"
-        return s
+        status = {}
+        status['message'] = s
+        status['digital out'] = {}
+        status['analogue in'] = {}
+        status['digital out'].update(self.digital_output_state)
+        status['analogue in'].update(self.analogue_states)
+        return status
 
 
 if __name__ == "__main__":

@@ -219,7 +219,13 @@ class MainController(object):
         """
         status = {}
         for t in self._threads:
-            status[t.name] = t.status
+            if t.name == 'DataloggerThread':
+                k = t.dataloggerName
+            else:
+                k = t.name
+            status[k] = {'status': t.status}
+
+        status['pending tasks'] = self.get_job_queue()
 
         return status
 
@@ -227,16 +233,13 @@ class MainController(object):
         """
         return a list of pending jobs
         """
-        ret = ""
+        jobq = []
         for t in self._threads:
-            ret += "\n" + t.name + "\n"
-            try:
-                ret += t.status + "\n  "
-            except:
-                ret += "[[no status message, t.status]]\n  "
-            ret += "\n  ".join(t.task_queue)
+            # only report on the calibration unit
+            if t.name == 'CalibrationUnitThread':
+                jobq = t.task_queue
 
-        return ret
+        return jobq
 
     def get_log_messages(self, start_time=None):
         """
