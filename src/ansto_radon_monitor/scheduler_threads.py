@@ -125,6 +125,7 @@ class DataThread(threading.Thread):
             except AttributeError:
                 desc = str(task.action)
             return f"{t} {desc}"
+
         with self._lock:
             ret = [task_to_readable(itm) for itm in self._scheduler.queue]
         return ret
@@ -135,7 +136,8 @@ class DataThread(threading.Thread):
         delay = next_interval(now, self.measurement_interval, self.measurement_offset)
         return delay
 
-    @task_description("Poll the measurement hardware")
+    # Don't describe this task
+    # @task_description("Poll the measurement hardware")
     def run_measurement(self):
         """call measurement function and schedule next"""
         self.measurement_func()
@@ -182,7 +184,7 @@ class CalibrationUnitThread(DataThread):
         super().__init__(*args, **kwargs)
         self.name = "CalibrationUnitThread"
         self._labjack = CalBoxLabjack(labjack_id)
-        self._data_table_name = "cal"
+        self._data_table_name = "calibration-unit"
         # task priority is used to identify tasks later, so that
         # pending cal and background can be cancelled by the user
         self._calibration_tasks_priority = 10
@@ -206,7 +208,7 @@ class CalibrationUnitThread(DataThread):
 
     @task_description("Calibration unit: cancel background")
     def cancel_background(self):
-        #self._labjack.reset_background()
+        # self._labjack.reset_background()
         self._labjack.reset_all()
         # TODO: handle case when source is still flushing
 
@@ -220,7 +222,8 @@ class CalibrationUnitThread(DataThread):
         # send measurement to datastore
         self._datastore.add_record(self._data_table_name, data)
 
-    @task_description("Calibration unit: measure state")
+    # don't include this function in the list of tasks
+    # @task_description("Calibration unit: measure state")
     def run_measurement(self):
         """call measurement function and schedule next
         
@@ -247,7 +250,9 @@ class CalibrationUnitThread(DataThread):
             immediately), by default None
         """
 
-        _logger.debug(f'run_calibration, parameters are flush_duration:{flush_duration}, inject_duration:{inject_duration}, start_time:{start_time}')
+        _logger.debug(
+            f"run_calibration, parameters are flush_duration:{flush_duration}, inject_duration:{inject_duration}, start_time:{start_time}"
+        )
 
         p = self._calibration_tasks_priority
         if start_time is not None:
@@ -266,7 +271,7 @@ class CalibrationUnitThread(DataThread):
         now = time.time()
         # allow some wiggle room - if flush_duration will take us up to a few seconds past the half
         # hour, just reduce flush_duration by a bit instead of postponing by another half hour
-        # this might happen if we're running the scheduler on the half hour
+        # this might happen (e.g) if we're starting the job using a task scheduler
         wiggle_room = 10
         delay_inject_start = (
             next_interval(now + flush_duration - wiggle_room, sec_per_30min)
@@ -349,7 +354,7 @@ class CalibrationUnitThread(DataThread):
 def fix_record(record):
     """fix a record from cr1000"""
     r = {}
-    for k,v in record.items():
+    for k, v in record.items():
         # work around (possible but not observed) problem
         # of bytes being used as key
         try:
@@ -366,23 +371,48 @@ def fix_record(record):
 
 class DataLoggerThread(DataThread):
     def __init__(self, datalogger_config, *args, **kwargs):
+        # TODO: include type annotations
         super().__init__(*args, **kwargs)
-        self.measurement_interval = 5  # TODO: from config?, this is in seconds
-        self._config = datalogger_config
-        self._datalogger = CR1000.from_url(datalogger_config.serial_port, timeout=2)
+        self.measurement_interval: int = 5  # TODO: from config?, this is in seconds
+        self._config: Configuration = datalogger_config
+        self._datalogger: CR1000 = CR1000.from_url(
+            datalogger_config.serial_port, timeout=2
+        )
+        # TODO: handle 'unable to connect' error
+        if hasattr(self._datalogger.pakbus.link, "baudrate"):
+            _logger.info(
+                f"Connected to datalogger using serial port, baudrate: {self._datalogger.pakbus.link.baudrate}"
+            )
         self.tables = [str(itm, "ascii") for itm in self._datalogger.list_tables()]
+        # Filter the tables - only include the ones which are useful
+        tables_to_use = ["Results", "RTV"]
+        self.tables = [itm for itm in self.tables if itm in tables_to_use]
         self.name = "DataLoggerThread"
-
+        self.status = "Connected"
 
     def measurement_func(self):
+        # TODO: handle lost connection
+        self.status = "Retrieving data from datalogger"
+        with self._lock:
+            for table_name in self.tables:
+                destination_table_name = self._config.name + "-" + table_name
+                update_time = self._datastore.get_update_time(destination_table_name)
+                if update_time is not None:
+                    update_time += datetime.timedelta(seconds=1)
 
-        for table_name in self.tables:
-            update_time = self._datastore.get_update_time(table_name) + datetime.timedelta(
-                seconds=1
-            )
-            data = self._datalogger.get_data(table_name, start_date=update_time)
+                for data in self._datalogger.get_data_generator(
+                    table_name, start_date=update_time
+                ):
+                    # return early if another task is trying to execute
+                    # (likely this is a shutdown request)
+                    if self.state_changed.is_set():
+                        return
+                    if len(data) > 0:
+                        _logger.debug(
+                            f"Received data ({len(data)} records) from table {destination_table_name} with start_date = {update_time}."
+                        )
 
-            if len(data) > 0:
-                _logger.debug(f"Received data ({len(data)} records) from table {table_name}.")
-                for itm in data:
-                    self._datastore.add_record(table_name, fix_record(itm))
+                        for itm in data:
+                            self._datastore.add_record(
+                                destination_table_name, fix_record(itm)
+                            )

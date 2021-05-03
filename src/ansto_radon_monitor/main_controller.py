@@ -45,6 +45,19 @@ def setup_logging(loglevel, logfile=None):
     )
 
 
+def register_sigint_handler(callback_func):
+    """
+    Register a signal handler to gracefully shut down when the user presses Ctrl-C
+    """
+    _logger.debug("Registering SIGING signal handler")
+
+    def signal_handler(sig, frame):
+        _logger.info("Received interrupt signal, shutting down.")
+        callback_func()
+
+    signal.signal(signal.SIGINT, signal_handler)
+
+
 def initialize(configuration: Configuration, mode: str = "thread"):
     """Start up the MainController object.  If it is already running, then try to connect to it.
 
@@ -53,24 +66,27 @@ def initialize(configuration: Configuration, mode: str = "thread"):
     configuration : dict-like
         program options
     mode : str, optional
-        'daemon', 'thread', or 'foreground', by default 'daemon'
+        'daemon', 'thread', 'connect', or 'foreground', by default 'daemon'
     
 
     Returns a main controller proxy (or perhaps a main controller itself, if running threaded)
     """
 
-    def ipc_server():
+    def ipc_server(mode="daemon"):
         # ref: http://www.zerorpc.io/
         # NOTE: if zerorpc becomes a problem, consider switching to
         # https://jsonrpcserver.readthedocs.io/en/latest/examples.html
         setup_logging(configuration.loglevel, configuration.logfile)
-        s = zerorpc.Server(MainController(configuration))
+        controller = MainController(configuration)
+        s = zerorpc.Server(controller)
         s.bind("ipc:///tmp/ansto-radon-monitor.ipc")
+        if mode == "foreground":
+            register_sigint_handler(controller.shutdown_and_exit)
         s.run()
 
     if mode == "foreground":
         # never returns
-        ipc_server()
+        ipc_server(mode=mode)
 
     elif mode == "thread":
         # MainController spawns threads as required to avoid blocking,
@@ -82,13 +98,14 @@ def initialize(configuration: Configuration, mode: str = "thread"):
         raise ValueError(f'"Daemon" mode is only supported on posix systems.')
 
     elif mode == "daemon":
-
         pid = configuration.pid_file
         # daemon ref: https://github.com/thesharp/daemonize
         process_id = os.fork()
         if process_id == 0:
             # inside the child, start the daemon and exit the forked process
-            daemon = Daemonize(app="ansto_radon_monitor", pid=pid, action=ipc_server)
+            daemon = Daemonize(
+                app="ansto_radon_monitor", pid=pid, action=ipc_server, logger=_logger
+            )
             daemon.start()
 
         # IPC client
@@ -97,12 +114,19 @@ def initialize(configuration: Configuration, mode: str = "thread"):
         c.connect("ipc:///tmp/ansto-radon-monitor.ipc")
         return c
 
+    elif mode == "connect":
+        # connect to running background process
+        # IPC client
+        c = zerorpc.Client()
+        # TODO: what if the server isn't running?  needs testing.
+        c.connect("ipc:///tmp/ansto-radon-monitor.ipc")
+        return c
+
     else:
         raise ValueError(f"Invalid mode: {mode}.")
 
 
 class MainController(object):
-
     def __init__(self, configuration: Configuration):
         self.datastore = DataStore(configuration.data_dir)
         self._configuration = configuration
@@ -121,7 +145,9 @@ class MainController(object):
             _logger.info(f"Setting up thread for detector {ii}")
             # note: poll the datalogger late (2 second measurement offset), so that it has a chance to update it's internal table
             # before being asked for data.
-            t = DataLoggerThread(detector_config, datastore=self.datastore, measurement_offset=2)
+            t = DataLoggerThread(
+                detector_config, datastore=self.datastore, measurement_offset=2
+            )
             thread_list.append(t)
 
         for itm in thread_list:
@@ -142,6 +168,13 @@ class MainController(object):
         for itm in self._threads:
             itm.join()
         _logger.debug("Finished waiting for threads.")
+
+    def shutdown_and_exit(self):
+        """
+        Ask threads to finish then exit process
+        """
+        self.shutdown()
+        sys.exit(0)
 
     def terminate(self):
         """
@@ -176,37 +209,35 @@ class MainController(object):
         """
         t, data = self.datastore.get_rows(table, start_time)
         return t, copy.deepcopy(data)
-    
+
     def list_tables(self):
         return self.datastore.tables
-
 
     def get_status(self):
         """
         return a tree of status information
         """
-        # TODO: read status information from threads
-        status = {'Detector 0': {'Datalogger': 'connected'} ,
-                  'Cal unit': {'Mode': 'Normal operation'},
-                  'Pending tasks': {'1999-31-21 23:59':'Fix y2k bug'}}
-                                 
+        status = {}
+        for t in self._threads:
+            status[t.name] = t.status
+
         return status
-    
+
     def get_job_queue(self):
         """
         return a list of pending jobs
         """
         ret = ""
         for t in self._threads:
-            ret += '\n' + t.name + '\n'
+            ret += "\n" + t.name + "\n"
             try:
-                ret += t.status + '\n  '
+                ret += t.status + "\n  "
             except:
                 ret += "[[no status message, t.status]]\n  "
-            ret += '\n  '.join(t.task_queue)
-            
+            ret += "\n  ".join(t.task_queue)
+
         return ret
-    
+
     def get_log_messages(self, start_time=None):
         """
         get all of the log messages stored since start_time
@@ -214,13 +245,20 @@ class MainController(object):
         t = None
         return t, "Log messages not yet available"
 
+    def run_calibration(
+        self,
+        flush_duration=10 * 3600,
+        inject_duration=5 * 3600,
+        radon_detector=0,
+        start_time=None,
+    ):
+        self._cal_system_task.run_calibration(
+            flush_duration, inject_duration, start_time=None
+        )
 
-    def run_calibration(self, flush_duration=10*3600, inject_duration=5*3600, radon_detector=0, start_time=None):
-        self._cal_system_task.run_calibration(flush_duration, inject_duration, start_time=None)
-    
-    def run_background(self, duration=12*3600, start_time=None):
+    def run_background(self, duration=12 * 3600, start_time=None):
         self._cal_system_task.run_background(duration, start_time=None)
-    
+
     def stop_calibration(self):
         self._cal_system_task.set_default_state()
 

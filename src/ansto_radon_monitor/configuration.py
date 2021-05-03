@@ -11,6 +11,7 @@ import sys
 import typing
 from dataclasses import dataclass, field
 from enum import Enum
+import copy
 
 import dacite
 import yaml
@@ -22,17 +23,32 @@ from ansto_radon_monitor import __version__
 
 LogLevel = typing.NewType("LogLevel", int)
 
-
-DETECTOR_KIND_CHOICES = ["L100", "L200", "L1500", "L5000"]
-
 DetectorKind = typing.NewType("DetectorKind", str)
 
+DETECTOR_KIND_CHOICES = [
+    DetectorKind("L100"),
+    DetectorKind("L200"),
+    DetectorKind("L1500"),
+    DetectorKind("L5000"),
+]
 
-def parse_detector_kind(s: DetectorKind):
-    s = s.upper()
-    if not s in DETECTOR_KIND_CHOICES:
+
+def parse_detector_kind(s: DetectorKind) -> DetectorKind:
+    sup = DetectorKind(s.upper())
+    if not sup in DETECTOR_KIND_CHOICES:
         raise RuntimeError(f"Unknown kind of radon detector: {s}")
-    return s
+    return sup
+
+
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ("yes", "true", "t", "y", "1"):
+        return True
+    elif v.lower() in ("no", "false", "f", "n", "0"):
+        return False
+    else:
+        raise ValueError("Boolean value expected.")
 
 
 @dataclass
@@ -43,7 +59,7 @@ class DetectorConfig:
 
     name: str = ""
     serial_port: str = ""
-    detector_kind: str = ""
+    kind: str = ""
 
 
 @dataclass
@@ -54,11 +70,13 @@ class Configuration:
 
     number_of_detectors: int = 1
     number_of_calibration_units: int = 1
-    loglevel: LogLevel = LogLevel(logging.WARN)
+    loglevel: LogLevel = LogLevel(logging.ERROR)
+    logfile: pathlib.Path = pathlib.Path("radon_monitor_messages.log")
     pid_file: pathlib.Path = pathlib.Path("/tmp/ansto_radon_monitor.pid")
     detector_config: typing.List[DetectorConfig] = field(default_factory=list)
     data_dir: pathlib.Path = pathlib.Path(".", "data").absolute()
     labjack_id: int = -1
+    foreground: bool = False
 
 
 def parse_config(raw_cfg):
@@ -69,6 +87,7 @@ def parse_config(raw_cfg):
         int: int,
         LogLevel: lambda x: LogLevel(logging._nameToLevel[x]),
         DetectorKind: parse_detector_kind,
+        bool: str2bool,
     }
 
     # create and validate the Configuration object
@@ -118,7 +137,19 @@ def get_parser():
     )
 
     parser.add_argument(
-        "action", choices=["run", "query"], default="run", help="action to perform",
+        "-fg",
+        "--foreground",
+        dest="foreground",
+        help="Run in foreground",
+        default="False",
+        action="store_true",
+    )
+
+    parser.add_argument(
+        "action",
+        choices=["run", "query", "quit", "calibrate", "background"],
+        default="run",
+        help="action to perform",
     )
     return parser
 
@@ -152,6 +183,7 @@ def config_from_commandline(
     """
 
     cmdline_args = parse_args(args)
+    print(args, cmdline_args)
 
     if raw_cfg is None:
         if cmdline_args.configuration_file.exists():
@@ -163,12 +195,16 @@ def config_from_commandline(
             )
             get_parser().print_help(sys.stderr)
             sys.exit(1)
+    else:
+        raw_cfg = copy.deepcopy(raw_cfg)
 
     # over-write config where options have been specified on the command line
-    for k in ["loglevel"]:
+    for k in ["loglevel", "foreground"]:
         val = vars(cmdline_args)[k]
         if val is not None:
             raw_cfg[k] = val
+
+    print(raw_cfg)
 
     config = parse_config(raw_cfg)
 
@@ -182,7 +218,7 @@ def config_from_commandline(
     print(f"Configuration parsed: {config}")
     _logger.debug(f"Configuration parsed: {config}")
 
-    return config
+    return config, cmdline_args
 
 
 def config_from_yamlfile(filename):
@@ -193,7 +229,7 @@ def config_from_yamlfile(filename):
 
 
 if __name__ == "__main__":
-    raw_cfg = raw_cfg = {
+    raw_cfg = {
         "detector_config": [
             {"kind": "L1500", "name": "low", "port": "/dev/ttyS0"},
             {"kind": "L1500", "name": "high", "port": "/dev/ttyS1"},

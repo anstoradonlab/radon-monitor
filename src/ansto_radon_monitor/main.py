@@ -65,9 +65,24 @@ def main(args):
     """
     # inital logging setup so that we can see messages from config parser
     setup_logging(logging.DEBUG)
-    configuration = config_from_commandline(args)
+    configuration, cmdline_args = config_from_commandline(args)
     setup_logging(configuration.loglevel)
     _logger.debug("Setting up...")
+
+    if cmdline_args.action == "run":
+        if configuration.foreground:
+            mode = "foreground"
+        else:
+            mode = "daemon"
+        control = initialize(configuration, mode=mode)
+
+    if cmdline_args.action == "quit":
+        control = initialize(configuration, mode="connect")
+        control.terminate()
+
+    elif cmdline_args.action == "query":
+        raise NotImplementedError("Query not implemented yet")
+
     try:
         control = initialize(configuration, mode="thread")
         time.sleep(30)
