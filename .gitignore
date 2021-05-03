@@ -13,6 +13,7 @@ __pycache__/*
 .*.swp
 */.ipynb_checkpoints/*
 .DS_Store
+.mypy_cache
 
 # Project files
 .ropeproject
@@ -52,3 +53,6 @@ MANIFEST
 
 # Data folder, created when app runs
 data/
+
+# Profile output
+*.py.prof
