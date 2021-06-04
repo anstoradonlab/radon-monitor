@@ -1,5 +1,7 @@
+import ctypes
 import logging
 import math
+import struct
 
 import u12
 
@@ -67,6 +69,22 @@ class LabjackWrapper:
 
         return values
 
+    @property
+    def serial_number(self):
+        d = self.device
+        # by default, this reads the bytes which make up the serial number
+        r = d.rawReadRAM()
+        # >>> print(r)
+        # {'DataByte3': 5, 'DataByte2': 246, 'DataByte1': 139, 'DataByte0': 170}
+        serial_no_bytes = [
+            r["DataByte3"],
+            r["DataByte2"],
+            r["DataByte1"],
+            r["DataByte0"],
+        ]
+        serial_no = struct.unpack(">I", struct.pack("BBBB", *serial_no_bytes))[0]
+        return serial_no
+
 
 class CalBoxLabjack:
     """Hardware interface for the labjack inside our Cal Box.
@@ -88,9 +106,14 @@ class CalBoxLabjack:
             If provided, this is the serial number of the labjack to connect to
         """
         self.no_hardware_mode = True
+        self.serial_number = None
         if labjack_id is not None:
             self.lj = LabjackWrapper(labjack_id, serialNumber=serialNumber)
             self.no_hardware_mode = False
+            self.serial_number = self.lj.serial_number
+            _logger.info(
+                f"Connected to labjack with serial number: {self.serial_number}"
+            )
 
         self._init_flags()
 
@@ -170,6 +193,10 @@ class CalBoxLabjack:
         _logger.info(f"Cal Box entered background mode")
         self._send_state_to_device()
 
+    def reset_calibration(self):
+        """Cancel a running background (but leave background-related 
+        flags unchanged)"""
+        self.reset_flush()
 
     def reset_all(self):
         """return to idle state"""
@@ -227,12 +254,67 @@ class CalBoxLabjack:
         else:
             s = "Unexpected DIO state: {flags}"
         status = {}
-        status['message'] = s
-        status['digital out'] = {}
-        status['analogue in'] = {}
-        status['digital out'].update(self.digital_output_state)
-        status['analogue in'].update(self.analogue_states)
+        status["message"] = s
+        status["digital out"] = {}
+        status["analogue in"] = {}
+        status["digital out"].update(self.digital_output_state)
+        status["analogue in"].update(self.analogue_states)
+        status["serial"] = self.serial_number
         return status
+
+
+#
+# .... utility functions
+#
+
+
+def list_all_u12():
+    """
+    A version of u12.listAll which works on both windows and linux/mac
+
+    Original docs:
+
+        Name: U12.listAll()
+        Args: See section 4.22 of the User's Guide
+        Desc: Searches the USB for all LabJacks, and returns the serial number and local ID for each
+
+        >>> dev = U12()
+        >>> dev.listAll()
+        >>> {'serialnumList': <u12.c_long_Array_127 object at 0x00E2AD50>, 'numberFound': 1, 'localIDList': <u12.c_long_Array_127 object at 0x00E2ADA0>}
+
+    TODO: return types differ between windows and linux versions FIXME
+    """
+    dev = u12.U12()
+    try:
+        # this is implemented by labjack on windows but not linux/mac
+        # returns {"serialnumList": serialnumList, "localIDList":localIDList, "numberFound":numberFound.value}
+        info = dev.listAll()
+        dev.close()
+
+    except AttributeError:
+        # this means that we're running on linux/mac
+        dev.close()
+        # follow the approach used in 'open' to open each device and get info.
+        # This is brittle and relies on manipulating the 'handle' field inside
+        # the U12 object, as well as direct access to the binary driver
+        staticLib = u12._loadLibrary()
+        devType = ctypes.c_ulong(1)
+        openDev = staticLib.LJUSB_OpenDevice
+        openDev.restype = ctypes.c_void_p
+        info = {"serialnumList": [], "localIDList": [], "numberFound": 0}
+        numDevices = staticLib.LJUSB_GetDevCount(devType)
+        for ii in range(numDevices):
+            handle = openDev(ii + 1, 0, devType)
+            if handle != 0 and handle is not None:
+                dev.handle = ctypes.c_void_p(handle)
+                try:
+                    info["serialnumList"].append(dev.rawReadSerial())
+                    info["localIDList"].append(dev.rawReadLocalId())
+                    info["numberFound"] += 1
+                finally:
+                    dev.close()
+
+    return info
 
 
 if __name__ == "__main__":

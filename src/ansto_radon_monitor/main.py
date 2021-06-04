@@ -21,7 +21,11 @@ import sys
 import time
 
 from ansto_radon_monitor import __version__
-from ansto_radon_monitor.configuration import Configuration, config_from_commandline
+from ansto_radon_monitor.configuration import (
+    Configuration,
+    config_from_commandline,
+    parse_args,
+)
 from ansto_radon_monitor.datastore import DataStore
 from ansto_radon_monitor.main_controller import MainController, initialize
 
@@ -63,6 +67,46 @@ def main(args):
     Args:
         args ([str]): command line parameter list
     """
+    # auxillary functions
+
+    # these do not require a config file, so parse the command line args early
+    cmdline_args = parse_args(args)
+    if cmdline_args.action == "listserialports":
+        import serial.tools.list_ports
+
+        n = 0
+        for info in sorted(serial.tools.list_ports.comports()):
+            print(
+                f"{info.device}\n    description: {info.description}\n           hwid: {info.hwid}"
+            )
+            n += 1
+        if n == 1:
+            print(f"{n} port found")
+        else:
+            print(f"{n} ports found")
+        return
+
+    if cmdline_args.action == "listlabjacks":
+        from labjack_interface import list_all_u12
+
+        info = list_all_u12()
+        # info: {'serialnumList': <u12.c_long_Array_127 object at 0x00E2AD50>,
+        #       'numberFound': 1, '
+        #        localIDList': <u12.c_long_Array_127 object at 0x00E2Au12.DA0>}
+        try:
+            n = len(info["localIDList"])
+        except IndexError:
+            n = 0
+        for ii in range(n):
+            print(
+                f"Labjack\n    local ID: {info['localIDList'][ii]}\n      serial: {info['serialnumList'][ii]}"
+            )
+        if n == 1:
+            print(f"{n} LabJack found")
+        else:
+            print(f"{n} LabJacks found")
+        return
+
     # inital logging setup so that we can see messages from config parser
     setup_logging(logging.DEBUG)
     configuration, cmdline_args = config_from_commandline(args)
@@ -75,24 +119,32 @@ def main(args):
         else:
             mode = "daemon"
         control = initialize(configuration, mode=mode)
+        return
+
+    # other actions mean that we need to connect
+    try:
+        control = initialize(configuration, mode="connect")
+    except zerorpc.exceptions.LostRemote:
+        print("Unable to connect to a running background process.")
+        control = None
 
     if cmdline_args.action == "quit":
-        control = initialize(configuration, mode="connect")
+        if control is None:
+            return
         control.terminate()
 
     elif cmdline_args.action == "query":
-        raise NotImplementedError("Query not implemented yet")
+        print("Current status:")
+        import pprint
 
-    try:
-        control = initialize(configuration, mode="thread")
-        time.sleep(30)
+        pprint.pprint(control.get_status())
 
-        print(control.datastore.data)
-
-        control.shutdown()
-
-    finally:
-        _logger.debug("Main function exiting.")
+    elif cmdline_args.action == "calibrate":
+        control.run_calibration()
+    else:
+        raise NotImplementedError(
+            f"Command line action '{cmdline_args.action}' not implemented"
+        )
 
 
 def run():

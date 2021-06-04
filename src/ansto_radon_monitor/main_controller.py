@@ -7,6 +7,7 @@ TODO: investigate use of https://docs.python.org/3/library/sched.html for timing
 
 """
 
+import copy
 import datetime
 import logging
 import math
@@ -15,9 +16,12 @@ import sched
 import signal
 import threading
 import time
-import copy
 
-import zerorpc
+# don't use zeropc on windows because it causes firewall-related messages
+if os.name == "posix":
+    import zerorpc
+else:
+    zeropc = None
 
 if os.name == "posix":
     from daemonize import Daemonize
@@ -85,8 +89,24 @@ def initialize(configuration: Configuration, mode: str = "thread"):
         s.run()
 
     if mode == "foreground":
-        # never returns
-        ipc_server(mode=mode)
+        if os.name == "posix":
+            pid = configuration.pid_file
+            # daemon ref: https://github.com/thesharp/daemonize
+            # inside the child, start the daemon and exit the forked process
+            daemon = Daemonize(
+                app="ansto_radon_monitor",
+                pid=pid,
+                action=ipc_server,
+                logger=_logger,
+                foreground=True,
+            )
+            daemon.start()
+        else:
+            # Windows version
+            # never returns and is not prevented from running multiple instances of the program
+            # it's is likely that the program will fail when trying to open a serial port if there
+            # is already a version of this app running.
+            ipc_server(mode=mode)
 
     elif mode == "thread":
         # MainController spawns threads as required to avoid blocking,
@@ -115,6 +135,7 @@ def initialize(configuration: Configuration, mode: str = "thread"):
         return c
 
     elif mode == "connect":
+        _logger.info("Attempting to connect to a running background process")
         # connect to running background process
         # IPC client
         c = zerorpc.Client()
@@ -183,9 +204,10 @@ class MainController(object):
         self.shutdown()
 
         # the following allows the shutdown to happen asynchronously
-        # in the background, while still returning to the caller
+        # in the background, while still returning to the caller.
+        # this avoids a 'broken pipe' message for the IPC client
         def delayed_exit():
-            time.sleep(10)
+            time.sleep(2)
             # use sigterm, to give daemon a chance to clean up
             os.kill(os.getpid(), signal.SIGTERM)
             time.sleep(10)
@@ -194,7 +216,7 @@ class MainController(object):
 
         t = threading.Thread(target=delayed_exit, daemon=True)
         t.start()
-        return "Ok - exiting in 10 sec"
+        return "Ok - exiting in 2 sec"
 
     def get_rows(self, table, start_time=None):
         """return the data from a data table, optionally just the
@@ -219,13 +241,13 @@ class MainController(object):
         """
         status = {}
         for t in self._threads:
-            if t.name == 'DataloggerThread':
+            if t.name == "DataloggerThread":
                 k = t.dataloggerName
             else:
                 k = t.name
-            status[k] = {'status': t.status}
+            status[k] = {"status": t.status}
 
-        status['pending tasks'] = self.get_job_queue()
+        status["pending tasks"] = self.get_job_queue()
 
         return status
 
@@ -236,7 +258,7 @@ class MainController(object):
         jobq = []
         for t in self._threads:
             # only report on the calibration unit
-            if t.name == 'CalibrationUnitThread':
+            if t.name == "CalibrationUnitThread":
                 jobq = t.task_queue
 
         return jobq
@@ -263,7 +285,7 @@ class MainController(object):
         self._cal_system_task.run_background(duration, start_time=None)
 
     def stop_calibration(self):
-        self._cal_system_task.set_default_state()
+        self._cal_system_task.cancel_calibration()
 
     def stop_background(self):
         self._cal_system_task.cancel_background()

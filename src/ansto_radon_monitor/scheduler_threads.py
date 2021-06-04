@@ -61,6 +61,9 @@ class DataThread(threading.Thread):
     """
     Base thread for data-oriented threads.  Sits in a loop and runs tasks,
     and can be shutdown cleanly from another thread.
+
+    The implementation of scheduling is based on `sched` from the standard library
+    https://docs.python.org/3/library/sched.html
     """
 
     def __init__(
@@ -181,15 +184,34 @@ class DataThread(threading.Thread):
 
 
 class CalibrationUnitThread(DataThread):
-    def __init__(self, labjack_id, *args, **kwargs):
+    def __init__(self, labjack_id, *args, serialNumber=None, **kwargs):
+
+        # Note: this code is run in the main thread, so avoid doing anything which
+        # might block here (instead, add tasks to the scheduler which is called
+        # inside )
         super().__init__(*args, **kwargs)
         self.name = "CalibrationUnitThread"
-        self._labjack = CalBoxLabjack(labjack_id)
+        self._labjack = None
         self._data_table_name = "calibration-unit"
+
         # task priority is used to identify tasks later, so that
         # pending cal and background can be cancelled by the user
         self._calibration_tasks_priority = 10
         self._background_tasks_priority = 15
+
+        self._scheduler.enter(
+            delay=0,
+            priority=-1000,  # needs to happend before anything else will work
+            action=self.connect_to_labjack,
+            kwargs={"labjack_id": labjack_id},
+        )
+
+        # ensure that the scheduler function is run immediately on startup
+        self.state_changed.set()
+
+    @task_description("Calibration unit: initialize")
+    def connect_to_labjack(self, labjack_id, serialNumber):
+        self._labjack = CalBoxLabjack(labjack_id, serialNumber=serialNumber)
 
     @task_description("Calibration unit: flush source")
     def set_flush_state(self):
@@ -211,10 +233,11 @@ class CalibrationUnitThread(DataThread):
     def set_default_state(self):
         self._labjack.reset_all()
 
-    @task_description("Calibration unit: cancel background")
-    def cancel_background(self):
+    def set_nonbackground_state(self):
         self._labjack.reset_background()
-        #self._labjack.reset_all()
+
+    def set_noncalibration_state(self):
+        self._labjack.reset_calibration()
 
     def measurement_func(self):
         t = datetime.datetime.utcnow()
@@ -282,7 +305,7 @@ class CalibrationUnitThread(DataThread):
             + flush_duration
             - wiggle_room
         )
-        
+
         # start injection
         self._scheduler.enter(
             delay=delay_inject_start, priority=p, action=self.set_inject_state,
@@ -329,7 +352,7 @@ class CalibrationUnitThread(DataThread):
 
         self.state_changed.set()
 
-    @task_description("Calibration unit: measure state")
+    @task_description("Calibration unit: cancel calibration")
     def cancel_calibration(self):
         """cancel an in-progress calibration and all pending ones"""
         tasks_to_remove = [
@@ -342,7 +365,25 @@ class CalibrationUnitThread(DataThread):
 
         # schedule a task to reset the cal box
         self._scheduler.enter(
-            delay=0, priority=0, action=self.set_default_state,
+            delay=0, priority=0, action=self.set_noncalibration_state,
+        )
+
+        self.state_changed.set()
+
+    @task_description("Calibration unit: cancel calibration")
+    def cancel_background(self):
+        """cancel an in-progress calibration and all pending ones"""
+        tasks_to_remove = [
+            itm
+            for itm in self._scheduler.queue
+            if itm.priority == self._background_tasks_priority
+        ]
+        for itm in tasks_to_remove:
+            self._scheduler.cancel(itm)
+
+        # schedule a task to reset the cal box
+        self._scheduler.enter(
+            delay=0, priority=0, action=self.set_nonbackground_state,
         )
 
         self.state_changed.set()
@@ -376,6 +417,24 @@ class DataLoggerThread(DataThread):
         super().__init__(*args, **kwargs)
         self.measurement_interval: int = 5  # TODO: from config?, this is in seconds
         self._config: Configuration = datalogger_config
+        self._datalogger = None
+        self.status = {"link": "connecting", "serial": None}
+        self.name = "DataLoggerThread"
+        self.detectorName = datalogger_config.name
+        self.tables = []
+
+        self._scheduler.enter(
+            delay=0,
+            priority=-1000,  # needs to happend before anything else will work
+            action=self.connect_to_datalogger,
+            kwargs={"datalogger_config": datalogger_config},
+        )
+
+        # ensure that the scheduler function is run immediately on startup
+        self.state_changed.set()
+
+    @task_description("Calibration unit: initialize")
+    def connect_to_datalogger(self, datalogger_config):
         self._datalogger: CR1000 = CR1000.from_url(
             datalogger_config.serial_port, timeout=2
         )
@@ -388,13 +447,12 @@ class DataLoggerThread(DataThread):
         # Filter the tables - only include the ones which are useful
         tables_to_use = ["Results", "RTV"]
         self.tables = [itm for itm in self.tables if itm in tables_to_use]
-        self.name = "DataLoggerThread"
-        self.detectorName = datalogger_config.name
-        self.status = {'Datalogger': 'connected'}
+        self.status["link"] = "connected"
+        self.status["serial"] = device.getprogstat()["SerialNbr"]
 
     def measurement_func(self):
         # TODO: handle lost connection
-        self.status['Datalogger'] = 'retrieving data'
+        self.status["link"] = "retrieving data"
         with self._lock:
             for table_name in self.tables:
                 destination_table_name = self._config.name + "-" + table_name
@@ -418,4 +476,4 @@ class DataLoggerThread(DataThread):
                             self._datastore.add_record(
                                 destination_table_name, fix_record(itm)
                             )
-        self.status['Datalogger'] = 'connected'
+        self.status["link"] = "connected"

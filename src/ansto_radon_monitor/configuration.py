@@ -4,6 +4,7 @@ https://tech.preferred.jp/en/blog/working-with-configuration-in-python/
 """
 
 import argparse
+import copy
 import datetime
 import logging
 import pathlib
@@ -11,7 +12,6 @@ import sys
 import typing
 from dataclasses import dataclass, field
 from enum import Enum
-import copy
 
 import dacite
 import yaml
@@ -147,9 +147,45 @@ def get_parser():
 
     parser.add_argument(
         "action",
-        choices=["run", "query", "quit", "calibrate", "background"],
+        choices=[
+            "run",
+            "query",
+            "quit",
+            "calibrate",
+            "background",
+            "listserialports",
+            "listlabjacks",
+        ],
         default="run",
-        help="action to perform",
+        help="""Action to perform
+    
+    RADON DETECTOR ACTIONS
+    These actions need a configuration file to be specified (using the -c or --config option)
+
+    run
+    Run the monitoring process in the background (unless the -fg or --foreground option is also given)
+    
+    query
+    Display status of the monitoring process and exit
+    
+    quit
+    Terminate the monitoring process
+    
+    calibrate
+    Ask the monitoring process to begin a calibration sequence
+    
+    background
+    Ask the monitoring process to  begin a background sequence
+    
+    AUXILLARY ACTIONS
+    These actions do not require a configuration file
+
+    listserialports
+    List all serial ports on the system
+
+    listlabjacks
+    List all labjack U12s connected to the system
+    """,
     )
     return parser
 
