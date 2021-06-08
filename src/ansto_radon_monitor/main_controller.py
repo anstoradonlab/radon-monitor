@@ -156,13 +156,17 @@ class MainController(object):
     def _start_threads(self):
         thread_list = []
         # calibration unit
+        # TODO: make this similar to detector - pass the config object.
+        serial = self._configuration.calbox.labjack_serial
+        if serial == -1:
+            serial = None
         self._cal_system_task = CalibrationUnitThread(
-            labjack_id=self._configuration.labjack_id, datastore=self.datastore
+            labjack_id=self._configuration.calbox.labjack_id, serialNumber=serial, datastore=self.datastore
         )
         thread_list.append(self._cal_system_task)
 
         # radon detector(s)
-        for ii, detector_config in enumerate(self._configuration.detector_config):
+        for ii, detector_config in enumerate(self._configuration.detectors):
             _logger.info(f"Setting up thread for detector {ii}")
             # note: poll the datalogger late (2 second measurement offset), so that it has a chance to update it's internal table
             # before being asked for data.

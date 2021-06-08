@@ -56,10 +56,23 @@ class DetectorConfig:
     """
     Configuration of a single radon detector
     """
-
     name: str = ""
     serial_port: str = ""
     kind: str = ""
+    datalogger_serial: int = -1
+
+
+@dataclass
+class CalUnitConfig:
+    """
+    Configuration of a calibration unit
+    """
+    kind: str = ""
+    labjack_id: int = -1
+    labjack_serial: int = -1
+    flush_duration_sec: int = 3600*12
+    inject_duration_sec: int = 3600*6
+    background_duration_sec: int = 3600*24
 
 
 @dataclass
@@ -67,16 +80,13 @@ class Configuration:
     """
     Configuration of the entire app
     """
-
-    number_of_detectors: int = 1
-    number_of_calibration_units: int = 1
+    foreground: bool = False
     loglevel: LogLevel = LogLevel(logging.ERROR)
     logfile: pathlib.Path = pathlib.Path("radon_monitor_messages.log")
     pid_file: pathlib.Path = pathlib.Path("/tmp/ansto_radon_monitor.pid")
-    detector_config: typing.List[DetectorConfig] = field(default_factory=list)
     data_dir: pathlib.Path = pathlib.Path(".", "data").absolute()
-    labjack_id: int = -1
-    foreground: bool = False
+    detectors: typing.List[DetectorConfig] = field(default_factory=list)
+    calbox: CalUnitConfig = CalUnitConfig()
 
 
 def parse_config(raw_cfg):

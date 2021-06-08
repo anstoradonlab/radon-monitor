@@ -203,7 +203,7 @@ class CalibrationUnitThread(DataThread):
             delay=0,
             priority=-1000,  # needs to happend before anything else will work
             action=self.connect_to_labjack,
-            kwargs={"labjack_id": labjack_id},
+            kwargs={"labjack_id": labjack_id, "serialNumber":serialNumber},
         )
 
         # ensure that the scheduler function is run immediately on startup
@@ -390,7 +390,13 @@ class CalibrationUnitThread(DataThread):
 
     @property
     def status(self):
-        return self._labjack.status
+        if self._labjack is None:
+            status = {}
+            status["message"] = 'no connection'
+        else:
+            status = self._labjack.status
+        
+        return status
 
 
 def fix_record(record):
@@ -412,43 +418,53 @@ def fix_record(record):
 
 
 class DataLoggerThread(DataThread):
-    def __init__(self, datalogger_config, *args, **kwargs):
+    def __init__(self, detector_config, *args, **kwargs):
         # TODO: include type annotations
         super().__init__(*args, **kwargs)
         self.measurement_interval: int = 5  # TODO: from config?, this is in seconds
-        self._config: Configuration = datalogger_config
+        self._config: Configuration = detector_config
         self._datalogger = None
         self.status = {"link": "connecting", "serial": None}
         self.name = "DataLoggerThread"
-        self.detectorName = datalogger_config.name
+        self.detectorName = detector_config.name
         self.tables = []
 
         self._scheduler.enter(
             delay=0,
             priority=-1000,  # needs to happend before anything else will work
             action=self.connect_to_datalogger,
-            kwargs={"datalogger_config": datalogger_config},
+            kwargs={"detector_config": detector_config},
         )
 
         # ensure that the scheduler function is run immediately on startup
         self.state_changed.set()
 
     @task_description("Calibration unit: initialize")
-    def connect_to_datalogger(self, datalogger_config):
-        self._datalogger: CR1000 = CR1000.from_url(
-            datalogger_config.serial_port, timeout=2
-        )
-        # TODO: handle 'unable to connect' error
-        if hasattr(self._datalogger.pakbus.link, "baudrate"):
-            _logger.info(
-                f"Connected to datalogger using serial port, baudrate: {self._datalogger.pakbus.link.baudrate}"
+    def connect_to_datalogger(self, detector_config):
+        with self._lock:
+            self._datalogger: CR1000 = CR1000.from_url(
+                detector_config.serial_port, timeout=2
             )
-        self.tables = [str(itm, "ascii") for itm in self._datalogger.list_tables()]
-        # Filter the tables - only include the ones which are useful
-        tables_to_use = ["Results", "RTV"]
-        self.tables = [itm for itm in self.tables if itm in tables_to_use]
-        self.status["link"] = "connected"
-        self.status["serial"] = device.getprogstat()["SerialNbr"]
+            # TODO: handle 'unable to connect' error
+            self.tables = [str(itm, "ascii") for itm in self._datalogger.list_tables()]
+            # Filter the tables - only include the ones which are useful
+            tables_to_use = ["Results", "RTV"]
+            self.tables = [itm for itm in self.tables if itm in tables_to_use]
+            self.status["link"] = "connected"
+            self.status["serial"] = int(self._datalogger.getprogstat()["SerialNbr"])
+            if not detector_config.datalogger_serial == -1:
+                if not self.status["serial"] == detector_config.datalogger_serial:
+                    _logger.error("Datalogger found, but serial number does not match configuration (required serial: {datalogger_config.serial}, discovered serial: {self.status['serial'] }")
+                    self._datalogger.close()
+                    self.status["link"] = "disconnected"
+                    # TODO: the user needs to be informed of this more clearly
+
+            if hasattr(self._datalogger.pakbus.link, "baudrate"):
+                _logger.info(
+                    f"Connected to datalogger (serial {self.status['serial']}) using serial port, baudrate: {self._datalogger.pakbus.link.baudrate}"
+                )
+
+
 
     def measurement_func(self):
         # TODO: handle lost connection
