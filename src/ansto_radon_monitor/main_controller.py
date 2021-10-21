@@ -33,7 +33,11 @@ _logger = logging.getLogger(__name__)
 from ansto_radon_monitor.configuration import Configuration
 from ansto_radon_monitor.datastore import DataStore
 
-from .scheduler_threads import CalibrationUnitThread, DataLoggerThread
+from .scheduler_threads import (
+    CalibrationUnitThread,
+    DataLoggerThread,
+    MockDataLoggerThread,
+)
 
 
 def setup_logging(loglevel, logfile=None):
@@ -52,6 +56,9 @@ def setup_logging(loglevel, logfile=None):
 def register_sigint_handler(callback_func):
     """
     Register a signal handler to gracefully shut down when the user presses Ctrl-C
+
+    Alternative approach:
+    https://gist.github.com/shiplu/0f1fd2f2a06519d0530c92533e18f264
     """
     _logger.debug("Registering SIGING signal handler")
 
@@ -84,8 +91,12 @@ def initialize(configuration: Configuration, mode: str = "thread"):
         controller = MainController(configuration)
         s = zerorpc.Server(controller)
         s.bind("ipc:///tmp/ansto-radon-monitor.ipc")
-        if mode == "foreground":
-            register_sigint_handler(controller.shutdown_and_exit)
+
+        # if mode == "foreground":
+        #    # TODO: this isn't working properly (need to hit ctrl-C twice)
+        #    # check out this for a solution: https://gist.github.com/shiplu/0f1fd2f2a06519d0530c92533e18f264
+        #    register_sigint_handler(controller.shutdown_and_exit)
+        register_sigint_handler(controller.shutdown_and_exit)
         s.run()
 
     if mode == "foreground":
@@ -104,7 +115,7 @@ def initialize(configuration: Configuration, mode: str = "thread"):
         else:
             # Windows version
             # never returns and is not prevented from running multiple instances of the program
-            # it's is likely that the program will fail when trying to open a serial port if there
+            # it is likely that the program will fail when trying to open a serial port if there
             # is already a version of this app running.
             ipc_server(mode=mode)
 
@@ -155,24 +166,30 @@ class MainController(object):
 
     def _start_threads(self):
         thread_list = []
+
         # calibration unit
-        # TODO: make this similar to detector - pass the config object.
-        serial = self._configuration.calbox.labjack_serial
-        if serial == -1:
-            serial = None
         self._cal_system_task = CalibrationUnitThread(
-            labjack_id=self._configuration.calbox.labjack_id, serialNumber=serial, datastore=self.datastore
+            self._configuration.calbox, datastore=self.datastore
         )
         thread_list.append(self._cal_system_task)
 
         # radon detector(s)
         for ii, detector_config in enumerate(self._configuration.detectors):
-            _logger.info(f"Setting up thread for detector {ii}")
-            # note: poll the datalogger late (2 second measurement offset), so that it has a chance to update it's internal table
-            # before being asked for data.
-            t = DataLoggerThread(
-                detector_config, datastore=self.datastore, measurement_offset=2
+            _logger.info(
+                f"Setting up thread for detector {ii} (type of detector: {detector_config.kind})"
             )
+            if detector_config.kind == "mock":
+                t = MockDataLoggerThread(
+                    detector_config, datastore=self.datastore, measurement_offset=2
+                )
+            elif detector_config.kind in ["L1500", "L750", "L200", "L100"]:
+                # note: poll the datalogger late (2 second measurement offset), so that it has a chance to update it's internal table
+                # before being asked for data.
+                t = DataLoggerThread(
+                    detector_config, datastore=self.datastore, measurement_offset=2
+                )
+            else:
+                raise NotImplementedError(f"Logging for detector of kind '{detector_config.kind}' is not implemented.")
             thread_list.append(t)
 
         for itm in thread_list:

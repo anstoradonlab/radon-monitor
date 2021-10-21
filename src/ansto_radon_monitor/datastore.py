@@ -66,15 +66,15 @@ class TableStorage:
         # Type conversions to perform when reading
         # note: default is -
         #   * first column is a timestamp
-        #   * for other columns, first try converting to float, the try bool, 
+        #   * for other columns, first try converting to float, the try bool,
         #  but leave as string if that fails
         def conv_from_csv(v):
             try:
                 v = float(v)
             except ValueError:
-                v = {'True':True, 'False':False}[v]
+                v = {"True": True, "False": False}[v]
             return v
-        
+
         typeconv = {"RecNbr": int}
 
         with open(p, "rt") as csvfile:

@@ -5,6 +5,7 @@ import struct
 
 import u12
 
+
 _logger = logging.getLogger(__name__)
 
 # reference for Labjack interface:
@@ -102,17 +103,22 @@ class CalBoxLabjack:
                 * `None`: don't connect to a labjack, but run anyway (this is 
                   for testing without access to a labjack)
         
-        serialNumber : option
+        serialNumber : int, optional
             If provided, this is the serial number of the labjack to connect to
         """
         self.no_hardware_mode = True
         self.serial_number = None
+
         if labjack_id is not None:
             self.lj = LabjackWrapper(labjack_id, serialNumber=serialNumber)
             self.no_hardware_mode = False
             self.serial_number = self.lj.serial_number
             _logger.info(
                 f"Connected to labjack with serial number: {self.serial_number}"
+            )
+        else:
+            _logger.warning(
+                f"Running without trying to connect to labjack because labjack_id is None"
             )
 
         self._init_flags()

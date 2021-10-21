@@ -9,6 +9,7 @@ import threading
 import time
 
 from pycampbellcr1000 import CR1000
+from pycampbellcr1000.utils import ListDict
 
 _logger = logging.getLogger()
 
@@ -184,12 +185,18 @@ class DataThread(threading.Thread):
 
 
 class CalibrationUnitThread(DataThread):
-    def __init__(self, labjack_id, *args, serialNumber=None, **kwargs):
+    def __init__(self, config, datastore, *args, **kwargs):
 
+        labjack_id = config.labjack_id
+        serialNumber = config.labjack_serial
+
+        # Labjack API needs None for serialNumber if we are to ignore it
+        if serialNumber == -1:
+            serialNumber = None
         # Note: this code is run in the main thread, so avoid doing anything which
         # might block here (instead, add tasks to the scheduler which is called
         # inside )
-        super().__init__(*args, **kwargs)
+        super().__init__(datastore, *args, **kwargs)
         self.name = "CalibrationUnitThread"
         self._labjack = None
         self._data_table_name = "calibration-unit"
@@ -199,11 +206,15 @@ class CalibrationUnitThread(DataThread):
         self._calibration_tasks_priority = 10
         self._background_tasks_priority = 15
 
+        # this special value of labjack_id tells the comms routines not to connect
+        if config.kind == "mock":
+            labjack_id = None
+
         self._scheduler.enter(
             delay=0,
             priority=-1000,  # needs to happend before anything else will work
             action=self.connect_to_labjack,
-            kwargs={"labjack_id": labjack_id, "serialNumber":serialNumber},
+            kwargs={"labjack_id": labjack_id, "serialNumber": serialNumber},
         )
 
         # ensure that the scheduler function is run immediately on startup
@@ -211,7 +222,19 @@ class CalibrationUnitThread(DataThread):
 
     @task_description("Calibration unit: initialize")
     def connect_to_labjack(self, labjack_id, serialNumber):
-        self._labjack = CalBoxLabjack(labjack_id, serialNumber=serialNumber)
+        try:
+            self._labjack = CalBoxLabjack(labjack_id, serialNumber=serialNumber)
+        except Exception as ex:
+            _logger.error(
+                "Unable to connect to calibration system LabJack using "
+                f"ID: {labjack_id} serial: {serialNumber}.  Retrying in 10sec."
+            )
+            self._scheduler.enter(
+                delay=10,
+                priority=-1000,  # needs to happend before anything else will work
+                action=self.connect_to_labjack,
+                kwargs={"labjack_id": labjack_id, "serialNumber": serialNumber},
+            )
 
     @task_description("Calibration unit: flush source")
     def set_flush_state(self):
@@ -392,10 +415,10 @@ class CalibrationUnitThread(DataThread):
     def status(self):
         if self._labjack is None:
             status = {}
-            status["message"] = 'no connection'
+            status["message"] = "no connection"
         else:
             status = self._labjack.status
-        
+
         return status
 
 
@@ -422,7 +445,7 @@ class DataLoggerThread(DataThread):
         # TODO: include type annotations
         super().__init__(*args, **kwargs)
         self.measurement_interval: int = 5  # TODO: from config?, this is in seconds
-        self._config: Configuration = detector_config
+        self._config = detector_config
         self._datalogger = None
         self.status = {"link": "connecting", "serial": None}
         self.name = "DataLoggerThread"
@@ -454,7 +477,9 @@ class DataLoggerThread(DataThread):
             self.status["serial"] = int(self._datalogger.getprogstat()["SerialNbr"])
             if not detector_config.datalogger_serial == -1:
                 if not self.status["serial"] == detector_config.datalogger_serial:
-                    _logger.error("Datalogger found, but serial number does not match configuration (required serial: {datalogger_config.serial}, discovered serial: {self.status['serial'] }")
+                    _logger.error(
+                        "Datalogger found, but serial number does not match configuration (required serial: {datalogger_config.serial}, discovered serial: {self.status['serial'] }"
+                    )
                     self._datalogger.close()
                     self.status["link"] = "disconnected"
                     # TODO: the user needs to be informed of this more clearly
@@ -463,8 +488,6 @@ class DataLoggerThread(DataThread):
                 _logger.info(
                     f"Connected to datalogger (serial {self.status['serial']}) using serial port, baudrate: {self._datalogger.pakbus.link.baudrate}"
                 )
-
-
 
     def measurement_func(self):
         # TODO: handle lost connection
@@ -477,6 +500,137 @@ class DataLoggerThread(DataThread):
                     update_time += datetime.timedelta(seconds=1)
 
                 for data in self._datalogger.get_data_generator(
+                    table_name, start_date=update_time
+                ):
+                    # return early if another task is trying to execute
+                    # (likely this is a shutdown request)
+                    if self.state_changed.is_set():
+                        return
+                    if len(data) > 0:
+                        _logger.debug(
+                            f"Received data ({len(data)} records) from table {destination_table_name} with start_date = {update_time}."
+                        )
+
+                        for itm in data:
+                            self._datastore.add_record(
+                                destination_table_name, fix_record(itm)
+                            )
+        self.status["link"] = "connected"
+
+
+class MockDataLoggerThread(DataThread):
+    def __init__(self, detector_config, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.measurement_interval: int = 5  # TODO: from config?, this is in seconds
+        self._config = detector_config
+        self._datalogger = None
+        self.status = {"link": "connecting to mock datalogger", "serial": None}
+        self.name = "MockDataLoggerThread"
+        self.detectorName = detector_config.name
+        self.tables = []
+        self._rec_nbr = {"RTV": 0, "Results": 0}
+
+        self._scheduler.enter(
+            delay=0,
+            priority=-1000,  # needs to happend before anything else will work
+            action=self.connect_to_datalogger,
+            kwargs={"detector_config": detector_config},
+        )
+
+        # ensure that the scheduler function is run immediately on startup
+        self.state_changed.set()
+
+    @task_description("Calibration unit: initialize")
+    def connect_to_datalogger(self, detector_config):
+        with self._lock:
+            time.sleep(5)  # simulate talking to datalogger
+            self.tables = ["Results", "RTV"]
+            self.status["link"] = "connected"
+            self.status["serial"] = "MOCK001"
+            self.status["link"] = "connected"
+            self.status["serial"] = int(42)
+            _logger.info(
+                f"Connected to MOCK datalogger (serial {self.status['serial']})"
+            )
+
+    def mock_data_generator(self, table_name, start_date):
+        """define some mock data which looks like it came from a datalogger"""
+
+        # an arbitrary reference time
+        tref = datetime.datetime(2000, 1, 1)
+        # rtv contains data at each 10 seconds
+        t_latest = datetime.datetime.utcnow()
+        t_latest = t_latest.replace(microsecond=0, second=t_latest.second // 10 * 10)
+        records = {}
+        records["RTV"] = ListDict()
+        numrecs = 100
+        dt = datetime.timedelta(seconds=10)
+        for ii in reversed(range(numrecs)):
+            t = t_latest + ii * dt
+            rec_num = int((t - tref).total_seconds() / dt.total_seconds())
+            itm = {
+                "Datetime": t,
+                "RecNbr": rec_num,
+                "ExFlow": 80.0,
+                "InFlow": 11.1,
+                "LLD": 3,
+                "Pres": 101325.0,
+                "TankP": 100.0,
+                "HV": 980.5,
+                "RelHum": 80.5,
+            }
+            records["RTV"].append(itm)
+        records["Results"] = ListDict()
+        t_latest = t_latest.replace(
+            microsecond=0, second=0, minute=t_latest.second // 30 * 30
+        )
+        dt = datetime.timedelta(minutes=30)
+        for ii in reversed(range(numrecs)):
+            t = t_latest + ii * dt
+            self._rec_nbr["Results"] += 1
+            rec_num = int((t - tref).total_seconds() / dt.total_seconds())
+            itm = {
+                "Datetime": t,
+                "RecNbr": rec_num,
+                "ExFlow_Tot": 0.0,
+                "InFlow_Avg": -13.84,
+                "LLD_Tot": 0.0,
+                "ULD_Tot": 0.0,
+                "Gas_meter_Tot": 0.0,
+                "AirT_Avg": -168.9,
+                "RelHum_Avg": 34.86,
+                "TankP_Avg": -558.7,
+                "Pres_Avg": 419.6658020019531,
+                "HV_Avg": -712.7,
+                "PanTemp_Avg": 21.26,
+                "BatV_Avg": 15.24,
+            }
+            records["Results"].append(itm)
+
+        recs_to_return = []
+        for itm in records[table_name]:
+            t = itm["Datetime"]
+            # yield records in batches of 10
+            
+            if start_date is None or t > start_date:
+                recs_to_return.append(itm)
+                if len(recs_to_return) >= 10:
+                    yield recs_to_return
+                    recs_to_return = []
+        if len(recs_to_return) > 0:
+            yield recs_to_return
+
+    def measurement_func(self):
+        # TODO: handle lost connection
+        self.status["link"] = "retrieving data"
+        with self._lock:
+            for table_name in self.tables:
+                destination_table_name = self._config.name + "-" + table_name
+                update_time = self._datastore.get_update_time(destination_table_name)
+                if update_time is not None:
+                    update_time += datetime.timedelta(seconds=1)
+
+                for data in self.mock_data_generator(
                     table_name, start_date=update_time
                 ):
                     # return early if another task is trying to execute

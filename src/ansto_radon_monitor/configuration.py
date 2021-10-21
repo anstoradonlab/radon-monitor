@@ -23,21 +23,22 @@ from ansto_radon_monitor import __version__
 
 LogLevel = typing.NewType("LogLevel", int)
 
-DetectorKind = typing.NewType("DetectorKind", str)
+# TODO: consider using an enumeration for detector kind?
+# DetectorKind = typing.NewType("DetectorKind", str)
 
-DETECTOR_KIND_CHOICES = [
-    DetectorKind("L100"),
-    DetectorKind("L200"),
-    DetectorKind("L1500"),
-    DetectorKind("L5000"),
-]
+# DETECTOR_KIND_CHOICES = [
+#     DetectorKind("L100"),
+#     DetectorKind("L200"),
+#     DetectorKind("L1500"),
+#     DetectorKind("L5000"),
+# ]
 
 
-def parse_detector_kind(s: DetectorKind) -> DetectorKind:
-    sup = DetectorKind(s.upper())
-    if not sup in DETECTOR_KIND_CHOICES:
-        raise RuntimeError(f"Unknown kind of radon detector: {s}")
-    return sup
+# def parse_detector_kind(s: DetectorKind) -> DetectorKind:
+#     sup = DetectorKind(s.upper())
+#     if not sup in DETECTOR_KIND_CHOICES:
+#         raise RuntimeError(f"Unknown kind of radon detector: {s}")
+#     return sup
 
 
 def str2bool(v):
@@ -56,6 +57,7 @@ class DetectorConfig:
     """
     Configuration of a single radon detector
     """
+
     name: str = ""
     serial_port: str = ""
     kind: str = ""
@@ -67,12 +69,13 @@ class CalUnitConfig:
     """
     Configuration of a calibration unit
     """
+
     kind: str = ""
-    labjack_id: int = -1
+    labjack_id: typing.Optional[int] = -1
     labjack_serial: int = -1
-    flush_duration_sec: int = 3600*12
-    inject_duration_sec: int = 3600*6
-    background_duration_sec: int = 3600*24
+    flush_duration_sec: int = 3600 * 12
+    inject_duration_sec: int = 3600 * 6
+    background_duration_sec: int = 3600 * 24
 
 
 @dataclass
@@ -80,6 +83,7 @@ class Configuration:
     """
     Configuration of the entire app
     """
+
     foreground: bool = False
     loglevel: LogLevel = LogLevel(logging.ERROR)
     logfile: pathlib.Path = pathlib.Path("radon_monitor_messages.log")
@@ -96,7 +100,7 @@ def parse_config(raw_cfg):
         pathlib.Path: lambda x: pathlib.Path(x).absolute(),
         int: int,
         LogLevel: lambda x: LogLevel(logging._nameToLevel[x]),
-        DetectorKind: parse_detector_kind,
+#        DetectorKind: parse_detector_kind,
         bool: str2bool,
     }
 
