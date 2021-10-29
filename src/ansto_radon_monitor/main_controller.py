@@ -3,8 +3,6 @@ The main class which controls worker threads.
 
 All functions are intended to return quickly, and then the class should later be polled for state
 
-TODO: investigate use of https://docs.python.org/3/library/sched.html for timing
-
 """
 
 import copy
@@ -38,6 +36,7 @@ from .scheduler_threads import (
     DataLoggerThread,
     MockDataLoggerThread,
 )
+
 
 
 def setup_logging(loglevel, logfile=None):
@@ -160,7 +159,7 @@ def initialize(configuration: Configuration, mode: str = "thread"):
 
 class MainController(object):
     def __init__(self, configuration: Configuration):
-        self.datastore = DataStore(configuration.data_dir)
+        self.datastore = DataStore(configuration)
         self._configuration = configuration
         self._start_threads()
 
@@ -189,7 +188,9 @@ class MainController(object):
                     detector_config, datastore=self.datastore, measurement_offset=2
                 )
             else:
-                raise NotImplementedError(f"Logging for detector of kind '{detector_config.kind}' is not implemented.")
+                raise NotImplementedError(
+                    f"Logging for detector of kind '{detector_config.kind}' is not implemented."
+                )
             thread_list.append(t)
 
         for itm in thread_list:

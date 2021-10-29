@@ -7,6 +7,8 @@ import sched
 import sys
 import threading
 import time
+from typing import Dict
+from ansto_radon_monitor.datastore import DataStore
 
 from pycampbellcr1000 import CR1000
 from pycampbellcr1000.utils import ListDict
@@ -55,6 +57,7 @@ def next_interval(sec, interval, offset=0.0):
     float
         time until next interval expires
     """
+    # TODO: handle the offset (check it is getting used first)
     return (math.ceil(sec / interval) * interval) - sec
 
 
@@ -65,6 +68,8 @@ class DataThread(threading.Thread):
 
     The implementation of scheduling is based on `sched` from the standard library
     https://docs.python.org/3/library/sched.html
+
+    TODO: shut down the entire application if the thread encounters an unhandled exception
     """
 
     def __init__(
@@ -199,7 +204,7 @@ class CalibrationUnitThread(DataThread):
         super().__init__(datastore, *args, **kwargs)
         self.name = "CalibrationUnitThread"
         self._labjack = None
-        self._data_table_name = "calibration-unit"
+        self._data_table_name = "calibration_unit"
 
         # task priority is used to identify tasks later, so that
         # pending cal and background can be cancelled by the user
@@ -268,7 +273,7 @@ class CalibrationUnitThread(DataThread):
         data = {"Datetime": t}
         data.update(copy.deepcopy(self._labjack.digital_output_state))
         data.update(self._labjack.analogue_states)
-        data["status"] = self.status
+        data["status"] = self.status.__repr__()
         # send measurement to datastore
         self._datastore.add_record(self._data_table_name, data)
 
@@ -422,7 +427,7 @@ class CalibrationUnitThread(DataThread):
         return status
 
 
-def fix_record(record):
+def fix_record(record: Dict):
     """fix a record from cr1000"""
     r = {}
     for k, v in record.items():
@@ -494,7 +499,7 @@ class DataLoggerThread(DataThread):
         self.status["link"] = "retrieving data"
         with self._lock:
             for table_name in self.tables:
-                destination_table_name = self._config.name + "-" + table_name
+                destination_table_name = self._config.name + "_" + table_name
                 update_time = self._datastore.get_update_time(destination_table_name)
                 if update_time is not None:
                     update_time += datetime.timedelta(seconds=1)
@@ -512,10 +517,13 @@ class DataLoggerThread(DataThread):
                         )
 
                         for itm in data:
-                            self._datastore.add_record(
-                                destination_table_name, fix_record(itm)
-                            )
+                            itm = fix_record(itm)
+                            itm["detector_name"] = self._config.name
+                            self._datastore.add_record(destination_table_name, itm)
         self.status["link"] = "connected"
+
+
+# TODO: refactor so this class is very similar to the one above
 
 
 class MockDataLoggerThread(DataThread):
@@ -563,19 +571,23 @@ class MockDataLoggerThread(DataThread):
         t_latest = t_latest.replace(microsecond=0, second=t_latest.second // 10 * 10)
         records = {}
         records["RTV"] = ListDict()
-        numrecs = 100
+        # the RTV data will be 8,640 records per day (6 per minute * 60 * 24)
+        numdays = 365
+        numrecs = 8640 * numdays
+        #numrecs = 10 # for small test
         dt = datetime.timedelta(seconds=10)
         for ii in reversed(range(numrecs)):
-            t = t_latest + ii * dt
+            t = t_latest - ii * dt
             rec_num = int((t - tref).total_seconds() / dt.total_seconds())
             itm = {
                 "Datetime": t,
                 "RecNbr": rec_num,
-                "ExFlow": 80.0,
+                "ExFlow": 80.01,
                 "InFlow": 11.1,
                 "LLD": 3,
-                "Pres": 101325.0,
-                "TankP": 100.0,
+                "ULD": 0,
+                "Pres": 101325.01,
+                "TankP": 100.01,
                 "HV": 980.5,
                 "RelHum": 80.5,
             }
@@ -585,8 +597,9 @@ class MockDataLoggerThread(DataThread):
             microsecond=0, second=0, minute=t_latest.second // 30 * 30
         )
         dt = datetime.timedelta(minutes=30)
+        numrecs = numdays * 24 * 2
         for ii in reversed(range(numrecs)):
-            t = t_latest + ii * dt
+            t = t_latest - ii * dt
             self._rec_nbr["Results"] += 1
             rec_num = int((t - tref).total_seconds() / dt.total_seconds())
             itm = {
@@ -610,11 +623,11 @@ class MockDataLoggerThread(DataThread):
         recs_to_return = []
         for itm in records[table_name]:
             t = itm["Datetime"]
-            # yield records in batches of 10
-            
+            # yield records in batches
+            batchsize = 1440*24
             if start_date is None or t > start_date:
                 recs_to_return.append(itm)
-                if len(recs_to_return) >= 10:
+                if len(recs_to_return) >= batchsize:
                     yield recs_to_return
                     recs_to_return = []
         if len(recs_to_return) > 0:
@@ -625,8 +638,10 @@ class MockDataLoggerThread(DataThread):
         self.status["link"] = "retrieving data"
         with self._lock:
             for table_name in self.tables:
-                destination_table_name = self._config.name + "-" + table_name
-                update_time = self._datastore.get_update_time(destination_table_name)
+                destination_table_name = table_name
+                update_time = self._datastore.get_update_time(
+                    destination_table_name, self._config.name
+                )
                 if update_time is not None:
                     update_time += datetime.timedelta(seconds=1)
 
@@ -641,9 +656,9 @@ class MockDataLoggerThread(DataThread):
                         _logger.debug(
                             f"Received data ({len(data)} records) from table {destination_table_name} with start_date = {update_time}."
                         )
-
+                        data = [fix_record(itm) for itm in data]
                         for itm in data:
-                            self._datastore.add_record(
-                                destination_table_name, fix_record(itm)
-                            )
+                            itm["DetectorName"] = self._config.name
+
+                        self._datastore.add_records(destination_table_name, data)
         self.status["link"] = "connected"

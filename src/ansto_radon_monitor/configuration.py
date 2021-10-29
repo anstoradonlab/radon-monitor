@@ -89,6 +89,7 @@ class Configuration:
     logfile: pathlib.Path = pathlib.Path("radon_monitor_messages.log")
     pid_file: pathlib.Path = pathlib.Path("/tmp/ansto_radon_monitor.pid")
     data_dir: pathlib.Path = pathlib.Path(".", "data").absolute()
+    data_file: pathlib.Path = pathlib.Path(".", "radon.sqlite").absolute()
     detectors: typing.List[DetectorConfig] = field(default_factory=list)
     calbox: CalUnitConfig = CalUnitConfig()
 
@@ -100,7 +101,7 @@ def parse_config(raw_cfg):
         pathlib.Path: lambda x: pathlib.Path(x).absolute(),
         int: int,
         LogLevel: lambda x: LogLevel(logging._nameToLevel[x]),
-#        DetectorKind: parse_detector_kind,
+        #        DetectorKind: parse_detector_kind,
         bool: str2bool,
     }
 

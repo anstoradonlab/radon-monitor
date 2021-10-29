@@ -1,6 +1,9 @@
 # Configuration for ANSTO two filter radon detector
 # Basic config, one 1500 L detector
 
+data_dir: "./data"
+data_file: "./radon.db"
+
 detectors:
   # detector_kind sets the type of radon detector.  Options are:
   #  "L1500" - standard 1500 litre detector
@@ -8,8 +11,13 @@ detectors:
   #  "mock" - used for testing without a connected radon detector
   - kind: "mock"
     serial_port: "serial:/dev/ttyUSB0:115200"
-    name: "TEST-002M"
+    name: "TEST_002M"
     datalogger_serial: -1
+  - kind: "mock"
+    serial_port: "serial:/dev/ttyUSB0:115200"
+    name: "TEST_050M"
+    datalogger_serial: -1
+
 
 calbox:
   # there are different kinds of calibration units.  The "generic" kind is the 
@@ -31,6 +39,6 @@ calbox:
   # Duration to switch to background mode for background charactisation (seconds)
   background_duration_sec: 3600
 
-# allowed log levels (from least output to most):
-# CRITICAL, ERROR, WARNING, INFO, DEBUG
+# allowed log levels (from least output through to most output):
+# "CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"
 loglevel: "DEBUG"
