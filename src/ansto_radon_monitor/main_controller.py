@@ -156,21 +156,72 @@ def initialize(configuration: Configuration, mode: str = "thread"):
     else:
         raise ValueError(f"Invalid mode: {mode}.")
 
+class MonitorThread(threading.Thread):
+    """
+    This thread periodically checks on the health of a list of threads
+    """
+    def __init__(self, main_controller, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._main_controller = main_controller
+        self.name = "MonitorThread"
+        self.cancelled = False
+        self.state_changed = threading.Event()
+
+    def shutdown(self):
+        self.cancelled = True
+        self.state_changed.set()
+
+    def run(self):
+        while True:
+            self.state_changed.wait(timeout=10)
+            if self.cancelled:
+                return
+            fail_count = 0
+            with self._main_controller._thread_list_lock:
+                for t in self._main_controller._threads:
+                    if not t.is_alive():
+                        if hasattr(t, 'exc_info') and t.exc_info is not None:
+                            try:
+                                exc_type, exc_value, exc_traceback = t.exc_info
+                                import traceback
+                                info = f'{type(exc_type)}: {exc_value} {traceback.format_tb(exc_traceback)}'
+                            except Exception as ex:
+                                info = f" Failed to obtain exec_info due to error: {ex}"
+                        else:
+                            info = ''
+                        _logger.critical(f"Thread {t.name} has stopped unexpectedly.{info}")
+                        # even though a failure has been detected, continue to loop through the entire
+                        # list of threads so that a simultaneous failure will still appear in the logs
+                        fail_count += 1
+            if fail_count > 0:
+                # at least for now, let's bring the whole thing down
+                #self._main_controller.shutdown_and_exit()
+                self._main_controller.terminate()
+                # TODO: the thread should not be crashing - it should be handling the error 
+                # internally.
+                # TODO: the behaviour here maybe should depend on how the logger is being called.
+                # If it's a library called by the GUI, perhaps it would make sense for
+                # just to shut down and then set a status e.g. "STOPPED" in the GUI
+                # so that the user has a chance to restart (or the GUI could make an 
+                # automatic attempt to re-start after a countdown expires)
 
 class MainController(object):
     def __init__(self, configuration: Configuration):
+        self._thread_list_lock = threading.RLock()
         self.datastore = DataStore(configuration)
         self._configuration = configuration
         self._start_threads()
 
     def _start_threads(self):
-        thread_list = []
+        with self._thread_list_lock:
+            self._threads = []
 
         # calibration unit
         self._cal_system_task = CalibrationUnitThread(
             self._configuration.calbox, datastore=self.datastore
         )
-        thread_list.append(self._cal_system_task)
+        with self._thread_list_lock:
+            self._threads.append(self._cal_system_task)
 
         # radon detector(s)
         for ii, detector_config in enumerate(self._configuration.detectors):
@@ -191,12 +242,21 @@ class MainController(object):
                 raise NotImplementedError(
                     f"Logging for detector of kind '{detector_config.kind}' is not implemented."
                 )
-            thread_list.append(t)
+            with self._thread_list_lock:
+                self._threads.append(t)
+        
+        # set up a thread to monitor self
+        # this thread accesses self._threads , hence the lock
+        # note - I don't think the lock is really required, but it helps to remind
+        # me that the list of threads is accessed from multiple threads
+        with self._thread_list_lock:
+            t = MonitorThread(self)
+            self._threads.append(t)
+        
+        with self._thread_list_lock:
+            for itm in self._threads:
+                itm.start()
 
-        for itm in thread_list:
-            itm.start()
-
-        self._threads = thread_list
 
     def shutdown(self):
         """
@@ -208,8 +268,10 @@ class MainController(object):
         _logger.debug("Shutting down datastore.")
         self.datastore.shutdown()
         _logger.debug("Waiting for threads...")
-        for itm in self._threads:
-            itm.join()
+        if (threading.main_thread()).ident == threading.get_ident():
+            # TODO: decide what *should* happen if shutdown is called from a thread other than the main one
+            for itm in self._threads:
+                itm.join()
         _logger.debug("Finished waiting for threads.")
 
     def shutdown_and_exit(self):

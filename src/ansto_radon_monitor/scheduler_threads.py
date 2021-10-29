@@ -83,6 +83,7 @@ class DataThread(threading.Thread):
     ):
         super().__init__(*args, **kwargs)
         self.name = "DataThread"
+        self.exc_info = None
         self._datastore = datastore
         self.cancelled = False
         self.state_changed = threading.Event()
@@ -160,33 +161,38 @@ class DataThread(threading.Thread):
         _logger.debug(f"Scheduler queue: {self._scheduler.queue}")
 
     def run(self):
-        _logger.debug("entered run")
-        time_until_next_event = 0.0
-        while True:
-            # wait until either the next task is due (at 'time_until_next_event')
-            # or another thread causes a state change
-            state_changed = self.state_changed.wait(timeout=time_until_next_event)
-            if state_changed:
-                _logger.debug("State was changed.")
-            self.state_changed.clear()
-            if self.cancelled:
-                break
-            else:
-                time_until_next_event = self._scheduler.run(blocking=False)
-                if time_until_next_event is None:
-                    _logger.error(
-                        "Expected to make a measurement, but no more events in scheduler."
-                    )
-                    time_until_next_event = self.measurement_interval
+        try:
+            _logger.debug(f"{self.name} has started running")
+            time_until_next_event = 0.0
+            while True:
+                # wait until either the next task is due (at 'time_until_next_event')
+                # or another thread causes a state change
+                state_changed = self.state_changed.wait(timeout=time_until_next_event)
+                if state_changed:
+                    _logger.debug("State was changed.")
+                self.state_changed.clear()
+                if self.cancelled:
+                    break
+                else:
+                    time_until_next_event = self._scheduler.run(blocking=False)
+                    if time_until_next_event is None:
+                        _logger.error(
+                            "Expected to make a measurement, but no more events in scheduler."
+                        )
+                        time_until_next_event = self.measurement_interval
 
-                _logger.debug(f"Time until next event: {time_until_next_event}")
+                    _logger.debug(f"Time until next event: {time_until_next_event}")
 
-                assert time_until_next_event >= 0
-                _logger.debug(f"Q: {self._scheduler.queue}")
-                _logger.debug(f"Task Queue: {self.task_queue}")
+                    assert time_until_next_event >= 0
+                    _logger.debug(f"Q: {self._scheduler.queue}")
+                    _logger.debug(f"Task Queue: {self.task_queue}")
 
-        _logger.debug("finished run - calling shutdown_func")
-        self.shutdown_func()
+            _logger.debug(f"{self.name} has finished and will call shutdown_func()")
+            self.shutdown_func()
+        except Exception as ex:
+            _logger.error(f"{self.name} is aborting with an unhandled exception")
+            self.exc_info = sys.exc_info()
+            raise ex
 
 
 class CalibrationUnitThread(DataThread):
@@ -538,6 +544,10 @@ class MockDataLoggerThread(DataThread):
         self.tables = []
         self._rec_nbr = {"RTV": 0, "Results": 0}
 
+        # throw an error after executing for a while
+        self.throw_an_error = True
+        self.t_first_alive = datetime.datetime.utcnow()
+
         self._scheduler.enter(
             delay=0,
             priority=-1000,  # needs to happend before anything else will work
@@ -636,6 +646,9 @@ class MockDataLoggerThread(DataThread):
     def measurement_func(self):
         # TODO: handle lost connection
         self.status["link"] = "retrieving data"
+        if self.throw_an_error:
+            if (datetime.datetime.utcnow() - self.t_first_alive) > datetime.timedelta(seconds=20):
+                raise RuntimeError("This should be an unhandled error.")
         with self._lock:
             for table_name in self.tables:
                 destination_table_name = table_name

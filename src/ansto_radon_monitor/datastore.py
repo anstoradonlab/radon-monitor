@@ -481,7 +481,10 @@ class DataStore(object):
         most_recent_time = None
         try:
             tstr = tuple(cur.execute(sql).fetchall()[0])[0]
-            most_recent_time = datetime.datetime.strptime(tstr, "%Y-%m-%d %H:%M:%S")
+            try:
+                most_recent_time = datetime.datetime.strptime(tstr, "%Y-%m-%d %H:%M:%S")
+            except Exception as ex:
+                _logger.error(f"Error parsing most recent time in database.  sql: {sql}, time string: '{tstr}'")
         except sqlite3.OperationalError as ex:
             _logger.debug(f"SQL exception: {ex} while executing {sql}")
             
