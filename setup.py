@@ -10,9 +10,7 @@ from setuptools import setup
 
 if __name__ == "__main__":
     try:
-        # Removed to avoid build-time dependency on git
-        # setup(use_scm_version={"version_scheme": "no-guess-dev"})
-        pass
+        setup()
     except:  # noqa
         print(
             "\n\nAn error occurred while building the project, "
