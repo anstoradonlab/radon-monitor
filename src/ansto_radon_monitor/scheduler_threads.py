@@ -8,10 +8,12 @@ import sys
 import threading
 import time
 from typing import Dict
-from ansto_radon_monitor.datastore import DataStore
 
+import numpy as np
 from pycampbellcr1000 import CR1000
 from pycampbellcr1000.utils import ListDict
+
+from ansto_radon_monitor.datastore import DataStore
 
 _logger = logging.getLogger()
 
@@ -28,7 +30,7 @@ def task_description(description_text):
     @describe("Adds two numbers")
     def add_two(a,b):
         return a+b
-    
+
     print(add_two.description)
     """
 
@@ -212,10 +214,13 @@ class CalibrationUnitThread(DataThread):
         self._labjack = None
         self._data_table_name = "calibration_unit"
 
-        # task priority is used to identify tasks later, so that
+        # lower numbers are higher priority
+        # task priority is *also* used to identify tasks later, so that
         # pending cal and background can be cancelled by the user
         self._calibration_tasks_priority = 10
         self._background_tasks_priority = 15
+        self._measurement_task_priority = 100
+        self._connection_task_priority = -1000
 
         # this special value of labjack_id tells the comms routines not to connect
         if config.kind == "mock":
@@ -223,7 +228,7 @@ class CalibrationUnitThread(DataThread):
 
         self._scheduler.enter(
             delay=0,
-            priority=-1000,  # needs to happend before anything else will work
+            priority=self._connection_task_priority,  # needs to happend before anything else will work
             action=self.connect_to_labjack,
             kwargs={"labjack_id": labjack_id, "serialNumber": serialNumber},
         )
@@ -242,7 +247,7 @@ class CalibrationUnitThread(DataThread):
             )
             self._scheduler.enter(
                 delay=10,
-                priority=-1000,  # needs to happend before anything else will work
+                priority=self._connection_task_priority,  # needs to happend before anything else will work
                 action=self.connect_to_labjack,
                 kwargs={"labjack_id": labjack_id, "serialNumber": serialNumber},
             )
@@ -277,9 +282,8 @@ class CalibrationUnitThread(DataThread):
         t = datetime.datetime.utcnow()
         t = t.replace(microsecond=0)
         data = {"Datetime": t}
-        data.update(copy.deepcopy(self._labjack.digital_output_state))
+        data.update(self._labjack.digital_output_state)
         data.update(self._labjack.analogue_states)
-        data["status"] = self.status.__repr__()
         # send measurement to datastore
         self._datastore.add_record(self._data_table_name, data)
 
@@ -287,13 +291,13 @@ class CalibrationUnitThread(DataThread):
     # @task_description("Calibration unit: measure state")
     def run_measurement(self):
         """call measurement function and schedule next
-        
+
         If measurement is due at the same time as an action, perform the action first"""
         with self._lock:
             self.measurement_func()
             self._scheduler.enter(
                 delay=self.seconds_until_next_measurement,
-                priority=100,
+                priority=self._measurement_task_priority,
                 action=self.run_measurement,
             )
 
@@ -325,7 +329,9 @@ class CalibrationUnitThread(DataThread):
         #
         # begin flushing
         self._scheduler.enter(
-            delay=initial_delay_seconds, priority=p, action=self.set_flush_state,
+            delay=initial_delay_seconds,
+            priority=p,
+            action=self.set_flush_state,
         )
         # start calibration *on* the half hour
         sec_per_30min = 30 * 60
@@ -342,13 +348,17 @@ class CalibrationUnitThread(DataThread):
 
         # start injection
         self._scheduler.enter(
-            delay=delay_inject_start, priority=p, action=self.set_inject_state,
+            delay=delay_inject_start,
+            priority=p,
+            action=self.set_inject_state,
         )
 
         # stop injection
         delay_inject_stop = delay_inject_start + inject_duration
         self._scheduler.enter(
-            delay=delay_inject_stop, priority=p, action=self.set_default_state,
+            delay=delay_inject_stop,
+            priority=p,
+            action=self.set_default_state,
         )
 
         self.state_changed.set()
@@ -375,7 +385,9 @@ class CalibrationUnitThread(DataThread):
         #
         # begin background
         self._scheduler.enter(
-            delay=initial_delay_seconds, priority=p, action=self.set_background_state,
+            delay=initial_delay_seconds,
+            priority=p,
+            action=self.set_background_state,
         )
         # reset the background flags
         self._scheduler.enter(
@@ -399,7 +411,9 @@ class CalibrationUnitThread(DataThread):
 
         # schedule a task to reset the cal box
         self._scheduler.enter(
-            delay=0, priority=0, action=self.set_noncalibration_state,
+            delay=0,
+            priority=0,
+            action=self.set_noncalibration_state,
         )
 
         self.state_changed.set()
@@ -417,7 +431,9 @@ class CalibrationUnitThread(DataThread):
 
         # schedule a task to reset the cal box
         self._scheduler.enter(
-            delay=0, priority=0, action=self.set_nonbackground_state,
+            delay=0,
+            priority=0,
+            action=self.set_nonbackground_state,
         )
 
         self.state_changed.set()
@@ -545,7 +561,7 @@ class MockDataLoggerThread(DataThread):
         self._rec_nbr = {"RTV": 0, "Results": 0}
 
         # throw an error after executing for a while
-        self.throw_an_error = True
+        self.throw_an_error = False
         self.t_first_alive = datetime.datetime.utcnow()
 
         self._scheduler.enter(
@@ -572,69 +588,89 @@ class MockDataLoggerThread(DataThread):
             )
 
     def mock_data_generator(self, table_name, start_date):
-        """define some mock data which looks like it came from a datalogger"""
+        """define some mock data which looks like it came from a datalogger
+
+        TODO: make this efficient enough to generate years worth of data
+        """
+        # number of records to return at once
+        # Database is good with 1440 * 6, but if we
+        # plan to query the rowid column later it's better to keep
+        # the batchsize smaller
+        batchsize = 1440 * 6
 
         # an arbitrary reference time
         tref = datetime.datetime(2000, 1, 1)
-        # rtv contains data at each 10 seconds
+        # number of days back in time to generate data for
+        numdays = 30
         t_latest = datetime.datetime.utcnow()
-        t_latest = t_latest.replace(microsecond=0, second=t_latest.second // 10 * 10)
-        records = {}
-        records["RTV"] = ListDict()
-        # the RTV data will be 8,640 records per day (6 per minute * 60 * 24)
-        numdays = 365
-        numrecs = 8640 * numdays
-        #numrecs = 10 # for small test
-        dt = datetime.timedelta(seconds=10)
-        for ii in reversed(range(numrecs)):
-            t = t_latest - ii * dt
-            rec_num = int((t - tref).total_seconds() / dt.total_seconds())
-            itm = {
-                "Datetime": t,
-                "RecNbr": rec_num,
-                "ExFlow": 80.01,
-                "InFlow": 11.1,
-                "LLD": 3,
-                "ULD": 0,
-                "Pres": 101325.01,
-                "TankP": 100.01,
-                "HV": 980.5,
-                "RelHum": 80.5,
-            }
-            records["RTV"].append(itm)
-        records["Results"] = ListDict()
-        t_latest = t_latest.replace(
-            microsecond=0, second=0, minute=t_latest.second // 30 * 30
-        )
-        dt = datetime.timedelta(minutes=30)
-        numrecs = numdays * 24 * 2
-        for ii in reversed(range(numrecs)):
-            t = t_latest - ii * dt
-            self._rec_nbr["Results"] += 1
-            rec_num = int((t - tref).total_seconds() / dt.total_seconds())
-            itm = {
-                "Datetime": t,
-                "RecNbr": rec_num,
-                "ExFlow_Tot": 0.0,
-                "InFlow_Avg": -13.84,
-                "LLD_Tot": 0.0,
-                "ULD_Tot": 0.0,
-                "Gas_meter_Tot": 0.0,
-                "AirT_Avg": -168.9,
-                "RelHum_Avg": 34.86,
-                "TankP_Avg": -558.7,
-                "Pres_Avg": 419.6658020019531,
-                "HV_Avg": -712.7,
-                "PanTemp_Avg": 21.26,
-                "BatV_Avg": 15.24,
-            }
-            records["Results"].append(itm)
+
+        if table_name == "RTV":
+            # rtv contains data at each 10 seconds
+            t_latest = t_latest.replace(
+                microsecond=0, second=t_latest.second // 10 * 10
+            )
+            dt = datetime.timedelta(seconds=10)
+            numrecs = 8640 * numdays
+        elif table_name == "Results":
+            t_latest = t_latest.replace(
+                microsecond=0, second=0, minute=t_latest.second // 30 * 30
+            )
+            dt = datetime.timedelta(minutes=30)
+            numrecs = numdays * 24 * 2
+
+        # if start date has been provided, use that for numrecs instead (limited to a maximum of numrecs)
+        if start_date is not None:
+            numrecs = min(
+                numrecs,
+                int((t_latest - start_date).total_seconds() // dt.total_seconds()),
+            )
 
         recs_to_return = []
-        for itm in records[table_name]:
-            t = itm["Datetime"]
-            # yield records in batches
-            batchsize = 1440*24
+
+        def rn_func(t):
+            return 200.0 + 100.0 * np.sin(
+                (t - tref).total_seconds() * 2 * np.pi / (3600 * 24)
+            )
+
+        rng = np.random.default_rng()
+
+        for ii in reversed(range(numrecs)):
+            if table_name == "RTV":
+                t = t_latest - ii * dt
+                rec_num = int((t - tref).total_seconds() / dt.total_seconds())
+                itm = {
+                    "Datetime": t,
+                    "RecNbr": rec_num,
+                    "ExFlow": 80.01,
+                    "InFlow": 11.1,
+                    "LLD": rng.poisson(rn_func(t) / 60.0),
+                    "ULD": 0,
+                    "Pres": 101325.01,
+                    "TankP": 100.01,
+                    "HV": 980.5,
+                    "RelHum": 80.5,
+                }
+            elif table_name == "Results":
+                t = t_latest - ii * dt
+                self._rec_nbr["Results"] += 1
+                rec_num = int((t - tref).total_seconds() / dt.total_seconds())
+                itm = {
+                    "Datetime": t,
+                    "RecNbr": rec_num,
+                    "ExFlow_Tot": 0.0,
+                    "InFlow_Avg": -13.84,
+                    "LLD_Tot": rng.poisson(rn_func(t)),
+                    "ULD_Tot": 0.0,
+                    "Gas_meter_Tot": 0.0,
+                    "AirT_Avg": -168.9,
+                    "RelHum_Avg": 34.86,
+                    "TankP_Avg": -558.7,
+                    "Pres_Avg": 419.6658020019531,
+                    "HV_Avg": -712.7,
+                    "PanTemp_Avg": 21.26,
+                    "BatV_Avg": 15.24,
+                }
+
             if start_date is None or t > start_date:
                 recs_to_return.append(itm)
                 if len(recs_to_return) >= batchsize:
@@ -647,7 +683,9 @@ class MockDataLoggerThread(DataThread):
         # TODO: handle lost connection
         self.status["link"] = "retrieving data"
         if self.throw_an_error:
-            if (datetime.datetime.utcnow() - self.t_first_alive) > datetime.timedelta(seconds=20):
+            if (datetime.datetime.utcnow() - self.t_first_alive) > datetime.timedelta(
+                seconds=120
+            ):
                 raise RuntimeError("This should be an unhandled error.")
         with self._lock:
             for table_name in self.tables:

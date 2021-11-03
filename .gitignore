@@ -52,8 +52,9 @@ MANIFEST
 # Per-project virtualenvs
 .venv*/
 
-# Data folder, created when app runs
+# Data folder and database, created when app runs
 data/
+*.db
 
 # Profile output
 *.py.prof

@@ -21,11 +21,9 @@ import sys
 import time
 
 from ansto_radon_monitor import __version__
-from ansto_radon_monitor.configuration import (
-    Configuration,
-    config_from_commandline,
-    parse_args,
-)
+from ansto_radon_monitor.configuration import (Configuration,
+                                               config_from_commandline,
+                                               parse_args)
 from ansto_radon_monitor.datastore import DataStore
 from ansto_radon_monitor.main_controller import MainController, initialize
 

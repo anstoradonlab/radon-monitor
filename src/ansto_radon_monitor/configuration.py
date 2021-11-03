@@ -227,7 +227,7 @@ def config_from_commandline(
     ----------
     args : list[str]
         command line arguments
-    
+
     raw_cfg : dict, optional
         raw configuration, optional.  If present, then `raw_cfg` is used instead of reading from
         a configuration file.

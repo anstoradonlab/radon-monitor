@@ -5,7 +5,6 @@ import struct
 
 import u12
 
-
 _logger = logging.getLogger(__name__)
 
 # reference for Labjack interface:
@@ -88,8 +87,7 @@ class LabjackWrapper:
 
 
 class CalBoxLabjack:
-    """Hardware interface for the labjack inside our Cal Box.
-    """
+    """Hardware interface for the labjack inside our Cal Box."""
 
     def __init__(self, labjack_id=-1, serialNumber=None):
         """Interface for the labjack, as it is installed in our pumped Cal Box
@@ -100,9 +98,9 @@ class CalBoxLabjack:
             ID number of the labjack to connect to, by default -1
             Special values:
                 * `-1`: connect to whichever labjack we can find
-                * `None`: don't connect to a labjack, but run anyway (this is 
+                * `None`: don't connect to a labjack, but run anyway (this is
                   for testing without access to a labjack)
-        
+
         serialNumber : int, optional
             If provided, this is the serial number of the labjack to connect to
         """
@@ -118,7 +116,7 @@ class CalBoxLabjack:
             )
         else:
             _logger.warning(
-                f"Running without trying to connect to labjack because labjack_id is None"
+                f"Running in test mode without trying to connect to labjack because labjack_id has been set to 'None'"
             )
 
         self._init_flags()
@@ -190,8 +188,7 @@ class CalBoxLabjack:
         self._send_state_to_device()
 
     def reset_background(self):
-        """Cancel a running background (but leave source flushing if it already is running)
-        """
+        """Cancel a running background (but leave source flushing if it already is running)"""
         self.digital_output_state["activate_cutoff_valve"] = False
         self.digital_output_state["disable_stack_blower"] = False
         self.digital_output_state["disable_external_blower"] = False
@@ -200,7 +197,7 @@ class CalBoxLabjack:
         self._send_state_to_device()
 
     def reset_calibration(self):
-        """Cancel a running background (but leave background-related 
+        """Cancel a running background (but leave background-related
         flags unchanged)"""
         self.reset_flush()
 

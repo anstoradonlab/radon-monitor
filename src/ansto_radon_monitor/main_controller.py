@@ -31,12 +31,8 @@ _logger = logging.getLogger(__name__)
 from ansto_radon_monitor.configuration import Configuration
 from ansto_radon_monitor.datastore import DataStore
 
-from .scheduler_threads import (
-    CalibrationUnitThread,
-    DataLoggerThread,
-    MockDataLoggerThread,
-)
-
+from .scheduler_threads import (CalibrationUnitThread, DataLoggerThread,
+                                MockDataLoggerThread)
 
 
 def setup_logging(loglevel, logfile=None):
@@ -77,7 +73,7 @@ def initialize(configuration: Configuration, mode: str = "thread"):
         program options
     mode : str, optional
         'daemon', 'thread', 'connect', or 'foreground', by default 'daemon'
-    
+
 
     Returns a main controller proxy (or perhaps a main controller itself, if running threaded)
     """
@@ -156,10 +152,12 @@ def initialize(configuration: Configuration, mode: str = "thread"):
     else:
         raise ValueError(f"Invalid mode: {mode}.")
 
+
 class MonitorThread(threading.Thread):
     """
     This thread periodically checks on the health of a list of threads
     """
+
     def __init__(self, main_controller, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._main_controller = main_controller
@@ -180,30 +178,34 @@ class MonitorThread(threading.Thread):
             with self._main_controller._thread_list_lock:
                 for t in self._main_controller._threads:
                     if not t.is_alive():
-                        if hasattr(t, 'exc_info') and t.exc_info is not None:
+                        if hasattr(t, "exc_info") and t.exc_info is not None:
                             try:
                                 exc_type, exc_value, exc_traceback = t.exc_info
                                 import traceback
-                                info = f'{type(exc_type)}: {exc_value} {traceback.format_tb(exc_traceback)}'
+
+                                info = f"{type(exc_type)}: {exc_value} {traceback.format_tb(exc_traceback)}"
                             except Exception as ex:
                                 info = f" Failed to obtain exec_info due to error: {ex}"
                         else:
-                            info = ''
-                        _logger.critical(f"Thread {t.name} has stopped unexpectedly.{info}")
+                            info = ""
+                        _logger.critical(
+                            f"Thread {t.name} has stopped unexpectedly.{info}"
+                        )
                         # even though a failure has been detected, continue to loop through the entire
                         # list of threads so that a simultaneous failure will still appear in the logs
                         fail_count += 1
             if fail_count > 0:
                 # at least for now, let's bring the whole thing down
-                #self._main_controller.shutdown_and_exit()
+                # self._main_controller.shutdown_and_exit()
                 self._main_controller.terminate()
-                # TODO: the thread should not be crashing - it should be handling the error 
+                # TODO: the thread should not be crashing - it should be handling the error
                 # internally.
                 # TODO: the behaviour here maybe should depend on how the logger is being called.
                 # If it's a library called by the GUI, perhaps it would make sense for
                 # just to shut down and then set a status e.g. "STOPPED" in the GUI
-                # so that the user has a chance to restart (or the GUI could make an 
+                # so that the user has a chance to restart (or the GUI could make an
                 # automatic attempt to re-start after a countdown expires)
+
 
 class MainController(object):
     def __init__(self, configuration: Configuration):
@@ -244,7 +246,7 @@ class MainController(object):
                 )
             with self._thread_list_lock:
                 self._threads.append(t)
-        
+
         # set up a thread to monitor self
         # this thread accesses self._threads , hence the lock
         # note - I don't think the lock is really required, but it helps to remind
@@ -252,11 +254,10 @@ class MainController(object):
         with self._thread_list_lock:
             t = MonitorThread(self)
             self._threads.append(t)
-        
+
         with self._thread_list_lock:
             for itm in self._threads:
                 itm.start()
-
 
     def shutdown(self):
         """
@@ -314,7 +315,7 @@ class MainController(object):
             [description]
         """
         t, data = self.datastore.get_rows(table, start_time)
-        return t, copy.deepcopy(data)
+        return t, data
 
     def list_tables(self):
         return self.datastore.tables

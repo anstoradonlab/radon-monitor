@@ -4,10 +4,10 @@ import datetime
 import logging
 import pathlib
 import sqlite3
-from sqlite3.dbapi2 import OperationalError
 import threading
 import typing
 from collections import defaultdict
+from sqlite3.dbapi2 import OperationalError
 
 _logger = logging.getLogger(__name__)
 
@@ -163,7 +163,7 @@ class TableStorage:
 
     def get_update_time(self):
         """Return the time when the table was updated, according to the timestamp in the time record
-           If the table has not yet been created, return None
+        If the table has not yet been created, return None
         """
         return self.latest_time
 
@@ -178,8 +178,7 @@ class TableStorage:
 
 
 def rowtime(row):
-    """return the timestamp for a row. Row may be in a few different forms.
-    """
+    """return the timestamp for a row. Row may be in a few different forms."""
     if "Datetime" in row:
         # dict case
         return row["Datetime"]
@@ -244,7 +243,7 @@ class CSVDataStore(object):
         datetime
             Update time according to the timestamp of the most recent time record.
             If the table has not yet been created, return None
-            If there is not any time information in the table, fall back to returning 
+            If there is not any time information in the table, fall back to returning
             the time of the last update in utc.
         """
         with self._data_lock:
@@ -273,9 +272,11 @@ def column_definition(column_name):
     """
 
     # Special columns - foreign key support
-    if column_name in ['DetectorName']:
-        return ('DetectorName integer, '
-                'FOREIGN KEY(DetectorName) REFERENCES detector_names(id)')
+    if column_name in ["DetectorName"]:
+        return (
+            "DetectorName integer, "
+            "FOREIGN KEY(DetectorName) REFERENCES detector_names(id)"
+        )
 
     dtype = ""
     # standard data columns - return a definition like: "column_name data_type"
@@ -302,7 +303,6 @@ def column_definition(column_name):
         "BatV": "float",
         "LLD": "integer",
         "ULD": "integer",
-
     }
 
     if k in known_cols:
@@ -312,8 +312,8 @@ def column_definition(column_name):
     elif column_name.startswith("LLD") or column_name.startswith("ULD"):
         dtype = "integer"
     else:
-        dtype = ''
-    
+        dtype = ""
+
     return f"{column_name} dtype".strip()
 
 
@@ -327,6 +327,9 @@ class DataStore(object):
         self._connection_per_thread = {}
         self._data_lock = threading.RLock()
         self._readonly = readonly
+
+        # the last row_id returned by "get_rows" per table
+        self._last_rowid = {}
 
         # this forces an immediate connection to the database
         # so that any errors will occur now (rather than once
@@ -342,7 +345,7 @@ class DataStore(object):
         """
         id = threading.get_ident()
         if not id in self._connection_per_thread:
-            _logger.debug(f"thread {id} connecting to database {self.data_file}")
+            _logger.info(f"thread {id} connecting to database {self.data_file}")
             con = sqlite3.connect(
                 self.data_file,
                 detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES,
@@ -360,50 +363,92 @@ class DataStore(object):
                         _logger.warning(
                             "Foreign key support is not enabled in SQLite database"
                         )
-                con.execute("CREATE TABLE IF NOT EXISTS detector_names (id INTEGER PRIMARY KEY, name TEXT UNIQUE)")
+                # create a table to store the detector names (as a space saving optimisation)
+                con.execute(
+                    "CREATE TABLE IF NOT EXISTS detector_names (id INTEGER PRIMARY KEY, name TEXT UNIQUE)"
+                )
 
         return self._connection_per_thread[id]
 
     def create_table(self, table_name, data):
         cur = self.con.cursor()
         keys = list(data.keys())
-        #dtypes = [database_dtype(itm) for itm in keys]
-        #definitions = [" ".join([k, dtype]).strip() for k, dtype in zip(keys, dtypes)]
-        #sql = f"CREATE TABLE {table_name} ({ ','.join(definitions) })"
-        table_definition = ",".join( (column_definition(itm) for itm in keys) )
-        sql = f"CREATE TABLE {table_name} ({table_definition})"
+        # dtypes = [database_dtype(itm) for itm in keys]
+        # definitions = [" ".join([k, dtype]).strip() for k, dtype in zip(keys, dtypes)]
+        # sql = f"CREATE TABLE {table_name} ({ ','.join(definitions) })"
+        table_definition = ",".join((column_definition(itm) for itm in keys))
+        # -- use the 'if not exists' in case another thread beats us here
+        sql = f"CREATE TABLE if not exists {table_name} ({table_definition})"
         _logger.debug(f"Executing SQL: {sql}")
         cur.execute(sql)
+        # create a view of this table which shows only the latest data
+        # (makes 'get_update_time' execute more quickly)
+        view_name = "Recent" + table_name
+        if table_name == "Results":
+            # 10 days?
+            nrows = 1440 * 6 * 2  # twice the batchsize in mock data generator
+        else:
+            nrows = 1440 * 6 * 2  # twice the batchsize in mock data generator
+        sql = f"CREATE VIEW if not exists {view_name} as SELECT * from {table_name} ORDER BY rowid DESC LIMIT {nrows}"
+        cur.execute(sql)
+        self.con.commit()
+
+    def modify_table(self, table_name, data):
+        # work out which columns are not present in the table at present
+        column_names = list(data.keys())
+        db_column_names = [
+            itm["name"] for itm in self.con.execute(f"PRAGMA table_info({table_name})")
+        ]
+        missing_column_names = [
+            itm for itm in column_names if not itm in db_column_names
+        ]
+        # print('-----------\n'+ '\n'.join((dict(itm).__repr__() for itm in db_column_names))+'\n----------')
+        # add each missing column to the table
+        for column_name in missing_column_names:
+            _logger.warning(
+                f'Adding missing column ({column_name}) to table "{table_name}"'
+            )
+            col_definition = column_definition(column_name)
+            sql = f"ALTER TABLE {table_name} ADD {col_definition}"
+            self.con.execute(sql)
         self.con.commit()
 
     def add_record(self, table_name, data):
         self.add_records(table_name, [data])
 
     def add_records(self, table_name, data):
+
+        if len(data) == 0:
+            _logger.warning(
+                "Programming error (?) - add_records called with zero-length data"
+            )
+            return
+
         cur = self.con.cursor()
-        sql = f"insert into {table_name} values ({ ','.join(['?']*len(data[0])) })"
+        column_names = list(data[0].keys())
+        sql = f"insert into {table_name} ({','.join(column_names)}) values ({ ','.join(['?']*len(data[0])) })"
         _logger.debug(f"Executing SQL: {sql}")
 
         # special handling for DetectorName
         # this replaces a detector name with an ID
-        if 'DetectorName' in data[0].keys():
-            names = set( (itm['DetectorName'] for itm in data) )
+        if "DetectorName" in data[0].keys():
+            names = set((itm["DetectorName"] for itm in data))
             for n in names:
                 # TODO: this could be done just once at startup
                 # (insert or ignore info from )
-                cur.execute("insert or ignore into detector_names values (Null, ?)", (n,))
+                cur.execute(
+                    "insert or ignore into detector_names values (Null, ?)", (n,)
+                )
             self.con.commit()
 
             cur = self.con.cursor()
             rows = cur.execute("select * from detector_names")
             name_to_id = {}
             for r in rows:
-                name_to_id[r['name']] = r['id']
-            
+                name_to_id[r["name"]] = r["id"]
+
             for itm in data:
-                itm['DetectorName'] = name_to_id[itm['DetectorName']]
-            
-            
+                itm["DetectorName"] = name_to_id[itm["DetectorName"]]
 
         row0 = data[0]
         data_without_headers = [tuple(itm.values()) for itm in data]
@@ -416,9 +461,18 @@ class DataStore(object):
             # else:
             cur.executemany(sql, data_without_headers)
         except sqlite3.OperationalError as ex:
+            # table doesn't exist yet
             _logger.debug(f"SQL error: {ex}")
             if ex.args[0].startswith("no such table:"):
                 self.create_table(table_name, row0)
+            # an error message like: "table calibration_unit has no column named comment"
+            elif (
+                ex.args[0]
+                .lower()
+                .startswith(f"table {table_name.lower()} has no column named")
+            ):
+                # new column(s) have somehow appeared in the table
+                self.modify_table(table_name, row0)
             else:
                 raise ex
 
@@ -430,8 +484,21 @@ class DataStore(object):
 
     def _get_table_names_from_disk(self):
         cur = self.con.cursor()
-        cur.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        try:
+            cur.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        except sqlite3.ProgrammingError as ex:
+            # sqlite3.ProgrammingError: Cannot operate on a closed database.
+            if ex.args == ("Cannot operate on a closed database.",):
+                _logger.warning(f"Attempted to read data from a closed database")
+                return []
+            else:
+                raise ex
+
         table_names = [itm[0] for itm in cur.fetchall()]
+        # filter out the 'detector_names' table
+        # TODO: check that this is a sensible thing to do.  Maybe it would make sense to
+        # include a "data tables" property instead.  Check how this is being used.
+        table_names = [itm for itm in table_names if not itm == "detector_names"]
         return table_names
 
     @property
@@ -451,10 +518,11 @@ class DataStore(object):
     def detector_id_from_name(self, detector_name):
         """Lookup the detector's ID from its name"""
         cur = self.con.cursor()
-        rows = cur.execute('select * from detector_names where "name"=?', (detector_name, ))
+        rows = cur.execute(
+            'select * from detector_names where "name"=?', (detector_name,)
+        )
         for r in rows:
-            return r['id']
-        
+            return r["id"]
 
     def get_update_time(self, table_name, detector_name):
 
@@ -470,42 +538,116 @@ class DataStore(object):
         datetime
             Update time according to the timestamp of the most recent time record.
             If the table has not yet been created, return None
-            If there is not any time information in the table, fall back to returning 
+            If there is not any time information in the table, fall back to returning
             the time of the last update in utc.
         """
         t0 = datetime.datetime.utcnow()
-        detector_id = self.detector_id_from_name(detector_name)
         cur = self.con.cursor()
         # note: can't combine 'max' with automatic conversion from timestamp
-        sql = f"select max(Datetime) from {table_name} where DetectorName='{detector_id}'"
+        # optimisation - run the query only on recent data
+        view_name = "Recent" + table_name
+        if detector_name is None:
+            sql = f"select max(Datetime) from {view_name}"
+        else:
+            detector_id = self.detector_id_from_name(detector_name)
+            sql = f"select max(Datetime) from {view_name} where DetectorName='{detector_id}'"
         most_recent_time = None
         try:
             tstr = tuple(cur.execute(sql).fetchall()[0])[0]
             try:
                 most_recent_time = datetime.datetime.strptime(tstr, "%Y-%m-%d %H:%M:%S")
             except Exception as ex:
-                _logger.error(f"Error parsing most recent time in database.  sql: {sql}, time string: '{tstr}'")
+                _logger.error(
+                    f"Error parsing most recent time in database.  sql: {sql}, time string: '{tstr}'"
+                )
         except sqlite3.OperationalError as ex:
             _logger.debug(f"SQL exception: {ex} while executing {sql}")
-            
+
         _logger.debug(
             f"Executing SQL: {sql}, returned: {most_recent_time}, took: {datetime.datetime.utcnow()-t0}"
         )
         return most_recent_time
 
-    def get_rows(self, table, start_time):
+    def get_rows(self, table_name, start_time, maxrows=1000, recent=True):
         """
         Get data from table beginning with start_time
+
+        TODO: doc fully
+        TODO: the 'start_time' should be replaced or augmented with a rowid
         """
+        t0 = datetime.datetime.utcnow()
+
+        rowid_max = self.con.execute(f"select max(rowid) from {table_name}").fetchall()[
+            0
+        ]["max(rowid)"]
+        last_rowid = self._last_rowid.get(table_name, 0)
+        self._last_rowid[table_name] = rowid_max
+
+        # create a temporary view which only contains the data seen since the last
+        using_a_view = False
+        if recent:
+            view_name = "recent_" + table_name
+            self.con.execute(f"drop view  if exists {view_name}")
+            self.con.execute(
+                f"create temp view {view_name} as select * from {table_name} where rowid > {last_rowid}"
+            )
+            using_a_view = True
+        else:
+            view_name = table_name
+
         # Execute SQL along the lines of:
         # SELECT * FROM tablename
         # WHERE columname >='2012-12-25 00:00:00'
         # AND columname <'2012-12-26 00:00:00'
-        t_str = start_time.strptime("%Y-%m-%d %H:%M:%S")
-        sql = f"SELECT * FROM {table} WHERE Datetime >= '{t_str}' ORDER BY Datetime"
+        # Note: this uses a subset (e.g. see https://stackoverflow.com/questions/7786570/get-another-order-after-limit)
+        if start_time is not None:
+            t_str = start_time.strftime("%Y-%m-%d %H:%M:%S")
+            sql = f"SELECT * from (SELECT * FROM {view_name} WHERE Datetime > '{t_str}' ORDER BY Datetime DESC LIMIT {maxrows}) as T1 order by Datetime ASC"
+        else:
+            sql = f"SELECT * from (SELECT * FROM {view_name} ORDER BY Datetime DESC LIMIT {maxrows}) as T1 ORDER BY Datetime ASC"
         _logger.debug(f"Executing SQL: {sql}")
-        cursor = self.con.execute(sql)
-        return cursor.fetchall()
+        try:
+            cursor = self.con.execute(sql)
+        except sqlite3.OperationalError as ex:
+            # sqlite3.OperationalError: no such column: Datetime
+            if ex.args == ("no such column: Datetime",):
+                _logger.warning(f"Datetime column not found in table {view_name}")
+                return None, []
+            else:
+                raise ex
+        except sqlite3.ProgrammingError as ex:
+            # sqlite3.ProgrammingError: Cannot operate on a closed database.
+            if ex.args == ("Cannot operate on a closed database.",):
+                _logger.warning(f"Attempted to read data from a closed database")
+                return None, []
+            else:
+                raise ex
+
+        # convert sqlite3.Row objects into plain python dicts
+        data = [dict(itm) for itm in cursor]
+        if len(data) == 0:
+            # no data obtained, so t is unchanged
+            t = start_time
+            # t = self.get_update_time(table_name, detector_name=None)
+        else:
+            t = max((itm["Datetime"] for itm in data))
+            # if t is a string, convert to python datetime at this point
+            if not hasattr(t, "strptime"):
+                t = datetime.datetime.strptime(t, "%Y-%m-%d %H:%M:%S")
+
+                def conv_date(itm):
+                    itm["Datetime"] = datetime.datetime.strptime(
+                        itm["Datetime"], "%Y-%m-%d %H:%M:%S"
+                    )
+                    return itm
+
+                data = [conv_date(itm) for itm in data]
+
+        _logger.debug(
+            f"Loading data (rows: {len(data)}, table: {view_name}, start time: {start_time}, max_t: {t}) took: {datetime.datetime.utcnow()-t0}"
+        )
+
+        return t, data
 
     def shutdown(self):
         """call this before shutdown"""
@@ -556,27 +698,27 @@ if __name__ == "__main__":
     print(ds.get_update_time("ThisTableDoesNotExist", "TEST_002M"))
 
     #%%
-    for row in ds.con.execute('''Select * from Results'''):
+    for row in ds.con.execute("""Select * from Results"""):
         print(dict(row))
 
-    for row in ds.con.execute('''Select * from detector_names'''):
+    for row in ds.con.execute("""Select * from detector_names"""):
         print(dict(row))
-
 
     #%%
-    for row in ds.con.execute('''Select * from Results 
+    for row in ds.con.execute(
+        """Select * from Results 
                                  left join detector_names on Results.DetectorName=detector_names.id
-                                 limit 10'''):
+                                 limit 10"""
+    ):
         print(dict(row))
-
 
     #%%
     if False:
         fn = "/home/alan/working/2021-03-radon-monitor-software/ansto_radon_monitor/data/2021/03/18-cal.csv"
         print("hello")
 
-        import sqlite3
         import datetime
+        import sqlite3
 
         con = sqlite3.connect(
             "test.sqlite", detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES
