@@ -62,6 +62,7 @@ class DetectorConfig:
     serial_port: str = ""
     kind: str = ""
     datalogger_serial: int = -1
+    csv_file_pattern: typing.Optional[str] = None
 
 
 @dataclass
@@ -90,6 +91,7 @@ class Configuration:
     pid_file: pathlib.Path = pathlib.Path("/tmp/ansto_radon_monitor.pid")
     data_dir: pathlib.Path = pathlib.Path(".", "data").absolute()
     data_file: pathlib.Path = pathlib.Path(".", "radon.sqlite").absolute()
+    legacy_file_timezone: float = 0
     detectors: typing.List[DetectorConfig] = field(default_factory=list)
     calbox: CalUnitConfig = CalUnitConfig()
 

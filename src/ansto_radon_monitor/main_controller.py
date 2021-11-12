@@ -32,7 +32,7 @@ from ansto_radon_monitor.configuration import Configuration
 from ansto_radon_monitor.datastore import DataStore
 
 from .scheduler_threads import (CalibrationUnitThread, DataLoggerThread,
-                                MockDataLoggerThread)
+                                MockDataLoggerThread, DataMinderThread)
 
 
 def setup_logging(loglevel, logfile=None):
@@ -246,6 +246,11 @@ class MainController(object):
                 )
             with self._thread_list_lock:
                 self._threads.append(t)
+
+        # a thread to schedule backups and exports from the database
+        with self._thread_list_lock:
+            t = DataMinderThread(self._configuration, datastore=self.datastore)
+            self._threads.append(t)
 
         # set up a thread to monitor self
         # this thread accesses self._threads , hence the lock

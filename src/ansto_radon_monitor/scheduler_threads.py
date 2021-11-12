@@ -713,3 +713,49 @@ class MockDataLoggerThread(DataThread):
 
                         self._datastore.add_records(destination_table_name, data)
         self.status["link"] = "connected"
+
+
+class DataMinderThread(DataThread):
+    """
+    This thread's job is to perform some maintainence tasks on the database
+
+    * database backups
+    * sync Results table to legacy-format csv files
+    * ...
+
+    These should be carried out periodically (depending on settings) or on-demand
+
+    """
+    def __init__(self, config, *args, **kwargs):
+        # TODO: include type annotations
+        super().__init__(*args, **kwargs)
+        self.measurement_interval: int = 5  # TODO: from config?, this is in seconds
+        self._config = config
+        self._datalogger = None
+        self.status = "Idle"
+        self.name = "DataMinderThread"
+
+        self._backup_lock = threading.RLock()
+        self._csv_output_lock = threading.RLock()
+
+        # perform some tasks a short time after startup
+        self._scheduler.enter(
+            delay=10,
+            priority=0,  # needs to happend before anything else will work
+            action=self.sync_legacy_files,
+            kwargs={"data_dir": None},
+        )
+
+        # ensure that the scheduler function is run immediately on startup
+        self.state_changed.set()
+    
+    def backup_datastore(self, destination_file):
+        
+        with self._backup_lock:
+            _logger.debug(f'Starting to backup datastore to {destination_file}')
+            raise NotImplementedError()
+
+    def sync_legacy_files(self, data_dir):
+        with self._csv_output_lock:
+            _logger.debug('Writing data to legacy file format')
+            self._datastore.sync_legacy_files(data_dir)

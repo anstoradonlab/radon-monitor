@@ -8,9 +8,13 @@ import threading
 import typing
 from collections import defaultdict
 from sqlite3.dbapi2 import OperationalError
+import os
 
 _logger = logging.getLogger(__name__)
 
+
+# database time format
+DBTFMT = "%Y-%m-%d %H:%M:%S"
 
 # TODO: reorganise + clean up
 
@@ -324,6 +328,7 @@ class DataStore(object):
 
     def __init__(self, config, readonly=False):
         self.data_file = str(config.data_file)
+        self._config = config
         self._connection_per_thread = {}
         self._data_lock = threading.RLock()
         self._readonly = readonly
@@ -392,6 +397,12 @@ class DataStore(object):
         sql = f"CREATE VIEW if not exists {view_name} as SELECT * from {table_name} ORDER BY rowid DESC LIMIT {nrows}"
         cur.execute(sql)
         self.con.commit()
+
+    def get_column_names(self, table_name):
+        db_column_names = [
+            itm["name"] for itm in self.con.execute(f"PRAGMA table_info({table_name})")
+        ]
+        return db_column_names
 
     def modify_table(self, table_name, data):
         # work out which columns are not present in the table at present
@@ -538,7 +549,8 @@ class DataStore(object):
         datetime
             Update time according to the timestamp of the most recent time record.
             If the table has not yet been created, return None
-            If there is not any time information in the table, fall back to returning
+            
+            TODO: (maybe) If there is not any time information in the table, fall back to returning
             the time of the last update in utc.
         """
         t0 = datetime.datetime.utcnow()
@@ -567,6 +579,33 @@ class DataStore(object):
             f"Executing SQL: {sql}, returned: {most_recent_time}, took: {datetime.datetime.utcnow()-t0}"
         )
         return most_recent_time
+    
+    def get_minimum_time(self, table_name):
+        """
+        Return the earliest time in the table
+
+         - slow (scan across all records)
+        """
+        t0 = datetime.datetime.utcnow()
+        sql = f"select min(Datetime) from {table_name}"
+        try:
+            tstr = tuple(self.con.execute(sql).fetchall()[0])[0]
+            try:
+                min_time = datetime.datetime.strptime(tstr, "%Y-%m-%d %H:%M:%S")
+            except Exception as ex:
+                _logger.error(
+                    f"Error parsing most recent time in database.  sql: {sql}, time string: '{tstr}'"
+                )
+                raise ex
+        except sqlite3.OperationalError as ex:
+            _logger.debug(f"SQL exception: {ex} while executing {sql}")
+            raise ex
+
+        _logger.debug(
+            f"Executing SQL: {sql}, returned: {min_time}, took: {datetime.datetime.utcnow()-t0}"
+        )
+        return min_time
+
 
     def get_rows(self, table_name, start_time, maxrows=1000, recent=True):
         """
@@ -648,6 +687,176 @@ class DataStore(object):
         )
 
         return t, data
+    
+
+    def sync_legacy_files(self, data_dir):
+        """
+        Write csv file in the old file format
+
+         - assume that locking is taken care by the caller
+         - the file name pattern is defined by configuration options
+        """
+
+        if data_dir is None:
+            data_dir = self._config.data_dir
+
+        table_name = 'Results'
+
+        tz_offset = datetime.timedelta(seconds = int(self._config.legacy_file_timezone*3600))
+        tmin_local = self.get_minimum_time(table_name) - tz_offset
+        tmax_local = self.get_update_time(table_name, None) - tz_offset
+
+        # define month names statically to prevent any interction with user's
+        # local settings (from list(calendar.month_abbr) )
+        month_abbr = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+        def next_year_month(y,m):
+            m += 1
+            if m > 12:
+                m = 1
+                y += 1
+            return y,m
+
+        def iter_months(tmin,tmax):
+            """
+            >>> import datetime
+            >>> tmin = datetime.datetime(2005, 6, 12)
+            >>> tmax = datetime.datetime(2006, 2, 8)
+            >>> list(iter_months(tmin,tmax))
+            [(2005, 6),
+            (2005, 7),
+            (2005, 8),
+            (2005, 9),
+            (2005, 10),
+            (2005, 11),
+            (2005, 12),
+            (2006, 1),
+            (2006, 2)]
+            """
+            y = tmin.year
+            m = tmin.month
+            while y < tmax.year or m <= tmax.month:
+                yield y, m
+                y,m = next_year_month(y, m)
+
+        # columns to retrieve
+        cols_to_skip = {'RecNbr', 'DetectorName', 'id', 'name'}
+        colnames = [itm for itm in self.get_column_names(table_name) if not itm in cols_to_skip]
+
+        def format_rec(row, headers=False):
+            """format a row, if headers is True then format for headers
+            
+            The format is intended to match this:
+                Year, DOY, Month, DOM, Time,  ExFlow, GM, InFlow, HV, Spare,LLD, ULD, TankP, Temp, AirT, RelHum, Press,  Batt, Comments, Flag
+                2020, 306,11,01,00:00, 45.42, 681, 8.12, 578.9, 2126, 1400, 0, 18.17, 34.56, 23.87, 63.83, 1009.168, 13.73,, 0
+
+            """
+            output = []
+            if headers:
+                for itm in row.keys():
+                    if itm == "Datetime":
+                        # special case - this gets expanded
+                        output.extend(("Year", "DOY", "Month", "DOM", "Time"))
+                    else:
+                        # strip the "_Tot" etc. suffix
+                        if itm.endswith("_Tot") or itm.endswith("_Avg"):
+                            itm = itm[:-4]
+                        output.append(itm)
+                output_str = ', '.join(output)
+                # two spaces after 'Time' in the headers
+                output_str.replace('Time, ', 'Time,  ')
+            else:
+                for k,itm in zip(row.keys(), row):
+                    assert(itm == row[k])
+                    if k == "Datetime":
+                        itm = datetime.datetime.strptime(itm, DBTFMT)
+                        doy = itm.timetuple().tm_yday
+                        itm_str = f"{itm.year}, {doy},{itm.month},{itm.day}, {itm.strftime('%H:%M')}"
+                        output.append(itm_str)
+                    elif itm is not None:
+                        output.append(str(itm))
+                    else:
+                        output.append('')
+                output_str = ', '.join(output)
+                # match the quirk of the comment column
+                output_str = output_str.replace(', ,', ',,')
+            return output_str
+
+        # iterate over each month from t0 to t1
+        for y,m in iter_months(tmin_local,tmax_local):
+            # work out t
+            # two digit year
+            yy = y % 100
+            m_txt = month_abbr[m]
+            t0_query = datetime.datetime(y,m,1,0,0,0) - tz_offset
+            y1,m1 = next_year_month(y, m)
+            t1_query = datetime.datetime(y1,m1,1,0,0,0) - tz_offset
+
+            # TODO:
+            # get detector names from database?
+            # what if config has changed?
+            for detector_config in self._config.detectors:
+                detector_name = detector_config.name
+                exec_t0 = datetime.datetime.utcnow()
+                sql = (f"SELECT {','.join(colnames)} from Results LEFT OUTER JOIN detector_names ON Results.DetectorName=detector_names.id "
+                    f"WHERE Datetime >= \"{t0_query.strftime(DBTFMT)}\" and Datetime < \"{t1_query.strftime(DBTFMT)}\" and name = \"{detector_name}\"")
+                
+                try:
+                    data = self.con.execute(sql).fetchall()
+                except Exception as ex:
+                    _logger.error(f'Error ({ex}) while executing sql: {sql}')
+                    raise ex
+                _logger.debug(f'Executing sql: {sql} took {datetime.datetime.utcnow() - exec_t0}')
+                numrows = len(data)
+                if numrows == 0:
+                    # skip this file - no data
+                    continue
+                fname = (detector_config.csv_file_pattern
+                                                    .replace('{MONTH}', m_txt)
+                                                    .replace('{YEAR}', f"{yy:02}")
+                                                    .replace('{NAME}', detector_name))
+                fname = os.path.abspath(os.path.join(self._config.data_dir, fname))
+                # check - does the output file already exist and contain at least as many rows
+                #         as there are in the database query
+                #         (this is all that is checked, e.g. if the table definition has changed there
+                #          will be a mess made FIXME )
+                csv_needs_update = True
+                if os.path.exists(fname):
+                    file_size_mb = os.path.getsize(fname) / 1024 / 1024
+                    # if the file size is larger than 10 Mbytes, it is very 
+                    # unlikely that we want to overwrite it and loading a large
+                    # file to count the lines might be slow or otherwise unwise
+                    # The files we expect to see are more like 200 kBytes in size
+                    if file_size_mb > 10:
+                        _logger.error(f"Skipping output to {fname} because there is already a file on disk which is over 10 Mbytes in size ({file_size_mb} Mbytes)")
+                        # bail out here to avoid loading the file
+                        continue
+
+                    with open(fname, 'rt') as fd:
+                        for count, _ in enumerate(fd):
+                            pass
+                        numrows_in_file = count+1
+                        
+                    if numrows_in_file >= numrows+1:
+                        # file has one extra row, for headers
+                        csv_needs_update = False
+                
+                if csv_needs_update:
+                    _logger.info(f"Updating csv file {fname}")
+                    # create a directory if necessary
+                    dirname = os.path.abspath(os.path.dirname(fname))
+                    if not os.path.exists(dirname):
+                        _logger.info(f"Creating directory {dirname}")
+                        os.makedirs(dirname)
+
+                    with open(fname, 'wt') as fd:
+                        fd.write(format_rec(data[0], headers=True))
+                        fd.write('\n')
+                        for row in data:
+                            fd.write(format_rec(row))
+                            fd.write('\n')
+
+
 
     def shutdown(self):
         """call this before shutdown"""
