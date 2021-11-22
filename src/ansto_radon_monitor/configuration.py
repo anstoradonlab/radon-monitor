@@ -90,7 +90,7 @@ class Configuration:
     logfile: pathlib.Path = pathlib.Path("radon_monitor_messages.log")
     pid_file: pathlib.Path = pathlib.Path("/tmp/ansto_radon_monitor.pid")
     data_dir: pathlib.Path = pathlib.Path(".", "data").absolute()
-    data_file: pathlib.Path = pathlib.Path(".", "radon.sqlite").absolute()
+    data_file: typing.Optional[pathlib.Path] = None
     legacy_file_timezone: float = 0
     detectors: typing.List[DetectorConfig] = field(default_factory=list)
     calbox: CalUnitConfig = CalUnitConfig()
@@ -113,6 +113,12 @@ def parse_config(raw_cfg):
         data=raw_cfg,
         config=dacite.Config(type_hooks=converters),
     )
+
+    # handle data_file not set (which is probably the usual case)
+    if configuration.data_file is None:
+        configuration.data_file = pathlib.Path(
+            configuration.data_dir, "current", "radon.db"
+        )
 
     return configuration
 

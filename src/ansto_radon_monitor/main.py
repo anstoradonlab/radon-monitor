@@ -40,6 +40,9 @@ def setup_logging(loglevel=logging.DEBUG):
     Args:
         loglevel (int): minimum loglevel for emitting messages
     """
+    # log all messages in UTC
+    logging.Formatter.converter = time.gmtime
+
     # logformat = "[%(asctime)s] %(levelname)s:%(name)s:%(message)s"
     logformat = "[%(levelname)1.1s %(asctime)s %(module)s:%(lineno)d %(threadName)s] %(message)s"
     logging.basicConfig(

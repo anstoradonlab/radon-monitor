@@ -1,3 +1,4 @@
+import collections
 import copy
 import datetime
 import functools
@@ -7,17 +8,28 @@ import sched
 import sys
 import threading
 import time
+import traceback
 from typing import Dict
 
 import numpy as np
 from pycampbellcr1000 import CR1000
 from pycampbellcr1000.utils import ListDict
 
+from ansto_radon_monitor.configuration import Configuration
 from ansto_radon_monitor.datastore import DataStore
 
 _logger = logging.getLogger()
 
 from .labjack_interface import CalBoxLabjack
+
+
+def log_backtrace_all_threads():
+    for th in threading.enumerate():
+        _logger.error(f"Thread {th}")
+        # print(f"Thread {th}", file=sys.stderr)
+        msg = "".join(traceback.format_stack(sys._current_frames()[th.ident]))
+        _logger.error(f"{msg}")
+        # print(f"{msg}", file=sys.stderr)
 
 
 def task_description(description_text):
@@ -105,6 +117,13 @@ class DataThread(threading.Thread):
 
         _logger.debug(f"Scheduler queue: {self._scheduler.queue}")
 
+        # this is used for detecting a hang
+        self._heartbeat_time_lock = threading.RLock()
+        self._heartbeat_time = time.time()
+        self._tolerate_hang = False
+
+        self._scheduler.enter(delay=1, priority=0, action=self.update_heartbeat_time)
+
     def shutdown(self):
         self.cancelled = True
         self.state_changed.set()
@@ -112,6 +131,21 @@ class DataThread(threading.Thread):
     @property
     def done(self):
         return _done
+
+    def update_heartbeat_time(self):
+        with self._heartbeat_time_lock:
+            self._heartbeat_time = time.time()
+        self._scheduler.enter(delay=1, priority=0, action=self.update_heartbeat_time)
+
+    @property
+    def heartbeat_age(self):
+        t = time.time()
+        with self._heartbeat_time_lock:
+            if self._tolerate_hang:
+                age = 0.0
+            else:
+                age = t - self._heartbeat_time
+        return age
 
     def measurement_func(self):
         _logger.debug(f"Taking measurement at {datetime.datetime.now()}")
@@ -192,7 +226,16 @@ class DataThread(threading.Thread):
             _logger.debug(f"{self.name} has finished and will call shutdown_func()")
             self.shutdown_func()
         except Exception as ex:
-            _logger.error(f"{self.name} is aborting with an unhandled exception")
+            _logger.error(
+                f"{self.name} is aborting with an unhandled exception. Stack trace for all threads follows."
+            )
+            for th in threading.enumerate():
+                _logger.error(f"Thread {th}")
+                # print(f"Thread {th}", file=sys.stderr)
+                msg = "".join(traceback.format_stack(sys._current_frames()[th.ident]))
+                _logger.error(f"{msg}")
+                # print(f"{msg}", file=sys.stderr)
+
             self.exc_info = sys.exc_info()
             raise ex
 
@@ -533,6 +576,8 @@ class DataLoggerThread(DataThread):
                     # (likely this is a shutdown request)
                     if self.state_changed.is_set():
                         return
+                    # it is Ok for this to take a long time to run - datalogger is slow
+                    self.update_heartbeat_time()
                     if len(data) > 0:
                         _logger.debug(
                             f"Received data ({len(data)} records) from table {destination_table_name} with start_date = {update_time}."
@@ -559,6 +604,7 @@ class MockDataLoggerThread(DataThread):
         self.detectorName = detector_config.name
         self.tables = []
         self._rec_nbr = {"RTV": 0, "Results": 0}
+        self.most_recent_time = {}
 
         # throw an error after executing for a while
         self.throw_an_error = False
@@ -590,7 +636,7 @@ class MockDataLoggerThread(DataThread):
     def mock_data_generator(self, table_name, start_date):
         """define some mock data which looks like it came from a datalogger
 
-        TODO: make this efficient enough to generate years worth of data
+        This behaves in a similar way to CR1000.get_data_generator
         """
         # number of records to return at once
         # Database is good with 1440 * 6, but if we
@@ -601,7 +647,8 @@ class MockDataLoggerThread(DataThread):
         # an arbitrary reference time
         tref = datetime.datetime(2000, 1, 1)
         # number of days back in time to generate data for
-        numdays = 30
+        # (need more than 60 to test rollover functions)
+        numdays = 100
         t_latest = datetime.datetime.utcnow()
 
         if table_name == "RTV":
@@ -622,7 +669,7 @@ class MockDataLoggerThread(DataThread):
         if start_date is not None:
             numrecs = min(
                 numrecs,
-                int((t_latest - start_date).total_seconds() // dt.total_seconds()),
+                int((t_latest - start_date).total_seconds() // dt.total_seconds()) + 1,
             )
 
         recs_to_return = []
@@ -671,7 +718,7 @@ class MockDataLoggerThread(DataThread):
                     "BatV_Avg": 15.24,
                 }
 
-            if start_date is None or t > start_date:
+            if start_date is None or t >= start_date:
                 recs_to_return.append(itm)
                 if len(recs_to_return) >= batchsize:
                     yield recs_to_return
@@ -693,19 +740,28 @@ class MockDataLoggerThread(DataThread):
                 update_time = self._datastore.get_update_time(
                     destination_table_name, self._config.name
                 )
+                if self.most_recent_time.get(table_name, None) is None:
+                    self.most_recent_time[table_name] = update_time
+                assert self.most_recent_time[table_name] == update_time
                 if update_time is not None:
                     update_time += datetime.timedelta(seconds=1)
 
                 for data in self.mock_data_generator(
                     table_name, start_date=update_time
                 ):
+                    # it is Ok for this loop to take a long time to execute - the datalogger is slow
+                    self.update_heartbeat_time()
                     # return early if another task is trying to execute
                     # (likely this is a shutdown request)
                     if self.state_changed.is_set():
                         return
                     if len(data) > 0:
+                        # data times
+                        td0 = data[0]["Datetime"]
+                        td1 = data[-1]["Datetime"]
+                        self.most_recent_time[table_name] = td1
                         _logger.debug(
-                            f"Received data ({len(data)} records) from table {destination_table_name} with start_date = {update_time}."
+                            f"Received data ({len(data)} records from interval {td0}--{td1}) from table {destination_table_name} with start_date = {update_time}."
                         )
                         data = [fix_record(itm) for itm in data]
                         for itm in data:
@@ -726,7 +782,8 @@ class DataMinderThread(DataThread):
     These should be carried out periodically (depending on settings) or on-demand
 
     """
-    def __init__(self, config, *args, **kwargs):
+
+    def __init__(self, config: Configuration, *args, **kwargs):
         # TODO: include type annotations
         super().__init__(*args, **kwargs)
         self.measurement_interval: int = 5  # TODO: from config?, this is in seconds
@@ -739,23 +796,73 @@ class DataMinderThread(DataThread):
         self._csv_output_lock = threading.RLock()
 
         # perform some tasks a short time after startup
+        # TODO: obtain backup time from configuration file
+        backup_time_of_day = datetime.time(0, 10)
+        delay_seconds = 1 * 60
         self._scheduler.enter(
-            delay=10,
-            priority=0,  # needs to happend before anything else will work
-            action=self.sync_legacy_files,
-            kwargs={"data_dir": None},
+            delay=delay_seconds,
+            priority=0,
+            action=self.run_database_tasks,
+            kwargs={"backup_time_of_day": backup_time_of_day},
         )
+
+        ## for debugging - print backtrace of all threads
+        # self._scheduler.enter(
+        #        delay=30,
+        #        priority=0,
+        #        action=log_backtrace_all_threads,
+        #        kwargs={},
+        #    )
 
         # ensure that the scheduler function is run immediately on startup
         self.state_changed.set()
-    
-    def backup_datastore(self, destination_file):
-        
+
+    def backup_active_database(self, backup_filename=None):
         with self._backup_lock:
-            _logger.debug(f'Starting to backup datastore to {destination_file}')
-            raise NotImplementedError()
+            self._datastore.backup_active_database(backup_filename)
+
+    def archive_data(self, data_dir):
+        with self._backup_lock:
+            _logger.debug(f"Archiving old records from active database")
+            self._datastore.archive_data(data_dir=self._config.data_dir)
 
     def sync_legacy_files(self, data_dir):
         with self._csv_output_lock:
-            _logger.debug('Writing data to legacy file format')
+            _logger.debug("Writing data to legacy file format")
             self._datastore.sync_legacy_files(data_dir)
+
+    def run_database_tasks(self, backup_time_of_day: datetime.time):
+        with self._heartbeat_time_lock:
+            self._tolerate_hang = True
+
+        # sleep here allows other database threads (which may be scheduled on the minute)
+        # to have a chance to run first
+        time.sleep(1)
+        t0 = datetime.datetime.utcnow()
+        # run tasks
+        self.sync_legacy_files(data_dir=self._config.data_dir)
+        self.archive_data(data_dir=self._config.data_dir)
+        self.backup_active_database()
+        t = datetime.datetime.utcnow()
+        _logger.info(f"Database backup, archive, and legacy file export took {t-t0}")
+
+        # re-schedule next backup
+        next_backup = datetime.datetime.combine(t.date(), backup_time_of_day)
+        if (next_backup - t).total_seconds() < 60:
+            next_backup += datetime.timedelta(days=1)
+        delay_seconds = (next_backup - t).total_seconds()
+
+        _logger.info(
+            f"Next backup scheduled for {next_backup} in {delay_seconds} seconds"
+        )
+
+        self._scheduler.enter(
+            delay=delay_seconds,
+            priority=0,
+            action=self.run_database_tasks,
+            kwargs={"backup_time_of_day": backup_time_of_day},
+        )
+
+        self.update_heartbeat_time()
+        with self._heartbeat_time_lock:
+            self._tolerate_hang = True

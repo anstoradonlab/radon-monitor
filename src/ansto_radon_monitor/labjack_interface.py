@@ -285,13 +285,23 @@ def list_all_u12():
         >>> dev.listAll()
         >>> {'serialnumList': <u12.c_long_Array_127 object at 0x00E2AD50>, 'numberFound': 1, 'localIDList': <u12.c_long_Array_127 object at 0x00E2ADA0>}
 
-    TODO: return types differ between windows and linux versions FIXME
+    TODO: return types differ between windows and linux versions (fixed but not verified)
     """
     dev = u12.U12()
     try:
         # this is implemented by labjack on windows but not linux/mac
         # returns {"serialnumList": serialnumList, "localIDList":localIDList, "numberFound":numberFound.value}
         info = dev.listAll()
+        # manipulate info so that it has the some type as the linux version
+        # (the driver returns arrays of fixed length 127 instead of lists, and the caller
+        # isn't supposed to look past the numberFound index)
+        N = info["numberFound"]
+        info_ret = {
+            "serialnumList": list(info["serialnumList"][:N]),
+            "localIDList": list(info["localIDList"][:N]),
+            "numberFound": N,
+        }
+        info = info_ret
         dev.close()
 
     except AttributeError:

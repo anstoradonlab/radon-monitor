@@ -14,6 +14,7 @@ import sched
 import signal
 import threading
 import time
+import traceback
 
 # don't use zeropc on windows because it causes firewall-related messages
 if os.name == "posix":
@@ -32,7 +33,7 @@ from ansto_radon_monitor.configuration import Configuration
 from ansto_radon_monitor.datastore import DataStore
 
 from .scheduler_threads import (CalibrationUnitThread, DataLoggerThread,
-                                MockDataLoggerThread, DataMinderThread)
+                                DataMinderThread, MockDataLoggerThread)
 
 
 def setup_logging(loglevel, logfile=None):
@@ -175,14 +176,15 @@ class MonitorThread(threading.Thread):
             if self.cancelled:
                 return
             fail_count = 0
+            #
+            # ... check for stopped threads
+            #
             with self._main_controller._thread_list_lock:
                 for t in self._main_controller._threads:
                     if not t.is_alive():
                         if hasattr(t, "exc_info") and t.exc_info is not None:
                             try:
                                 exc_type, exc_value, exc_traceback = t.exc_info
-                                import traceback
-
                                 info = f"{type(exc_type)}: {exc_value} {traceback.format_tb(exc_traceback)}"
                             except Exception as ex:
                                 info = f" Failed to obtain exec_info due to error: {ex}"
@@ -205,6 +207,26 @@ class MonitorThread(threading.Thread):
                 # just to shut down and then set a status e.g. "STOPPED" in the GUI
                 # so that the user has a chance to restart (or the GUI could make an
                 # automatic attempt to re-start after a countdown expires)
+            #
+            # ... check for hung threads and report
+            #
+            with self._main_controller._thread_list_lock:
+                for t in self._main_controller._threads:
+                    # TODO: move to variable, or configuration
+                    if not hasattr(t, "heartbeat_age"):
+                        # not a DataThread, no need to monitor
+                        continue
+                    age = t.heartbeat_age
+                    if age > 10:
+                        _logger.error(
+                            f"Thread {t.name} appears to be stuck (no heartbeat for {age} seconds).  A stack trace of all threads follows:"
+                        )
+                        for th in threading.enumerate():
+                            _logger.error(f"Thread {th}")
+                            msg = "".join(
+                                traceback.format_stack(sys._current_frames()[th.ident])
+                            )
+                            _logger.error(f"{msg}")
 
 
 class MainController(object):
@@ -324,6 +346,9 @@ class MainController(object):
 
     def list_tables(self):
         return self.datastore.tables
+
+    def list_data_tables(self):
+        return self.datastore.data_tables
 
     def get_status(self):
         """

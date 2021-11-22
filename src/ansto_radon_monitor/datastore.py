@@ -2,13 +2,16 @@
 import csv
 import datetime
 import logging
+import os
 import pathlib
 import sqlite3
+import sys
 import threading
+import time
+import traceback
 import typing
 from collections import defaultdict
 from sqlite3.dbapi2 import OperationalError
-import os
 
 _logger = logging.getLogger(__name__)
 
@@ -16,7 +19,48 @@ _logger = logging.getLogger(__name__)
 # database time format
 DBTFMT = "%Y-%m-%d %H:%M:%S"
 
+# utility functions
+def next_year_month(y, m):
+    m += 1
+    if m > 12:
+        m = 1
+        y += 1
+    return y, m
+
+
+def iter_months(tmin, tmax):
+    """
+    >>> import datetime
+    >>> tmin = datetime.datetime(2005, 6, 12)
+    >>> tmax = datetime.datetime(2006, 2, 8)
+    >>> list(iter_months(tmin,tmax))
+    [(2005, 6),
+    (2005, 7),
+    (2005, 8),
+    (2005, 9),
+    (2005, 10),
+    (2005, 11),
+    (2005, 12),
+    (2006, 1),
+    (2006, 2)]
+    """
+    y = tmin.year
+    m = tmin.month
+    while y < tmax.year or m <= tmax.month:
+        yield y, m
+        y, m = next_year_month(y, m)
+
+
 # TODO: reorganise + clean up
+
+
+def log_backtrace_all_threads():
+    for th in threading.enumerate():
+        _logger.error(f"Thread {th}")
+        # print(f"Thread {th}", file=sys.stderr)
+        msg = "".join(traceback.format_stack(sys._current_frames()[th.ident]))
+        _logger.error(f"{msg}")
+        # print(f"{msg}", file=sys.stderr)
 
 
 class TableStorage:
@@ -348,17 +392,30 @@ class DataStore(object):
 
         Enables options for type conversion and sqlite3's Row object
         """
-        id = threading.get_ident()
-        if not id in self._connection_per_thread:
-            _logger.info(f"thread {id} connecting to database {self.data_file}")
+        # default timeout is 5 seconds - make this much longer
+        # (in testing, no DB operations take more than about 4 seconds)
+        timeout_seconds = 60 * 5
+        # timeout_seconds = 1 # for testing (finds failure points)
+        tid = threading.get_ident()
+        if not tid in self._connection_per_thread:
+            _logger.info(f"thread {tid} connecting to database {self.data_file}")
+            # ensure directory exists
+            db_directory = os.path.dirname(self.data_file)
+            if not os.path.exists(db_directory):
+                os.makedirs(db_directory)
             con = sqlite3.connect(
                 self.data_file,
                 detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES,
+                timeout=timeout_seconds,
             )
             con.row_factory = sqlite3.Row
-            self._connection_per_thread[id] = con
+            self._connection_per_thread[tid] = con
 
             if not self._readonly:
+                # improve write speed an concurrency (at the expense of extra files on disk)
+                # https://www.sqlite.org/wal.html
+                con.execute("PRAGMA journal_mode=WAL")
+                con.execute("PRAGMA synchronous=NORMAL")
                 # enable foreign key support
                 con.execute("PRAGMA foreign_keys = 1")
                 # check that this worked
@@ -373,7 +430,7 @@ class DataStore(object):
                     "CREATE TABLE IF NOT EXISTS detector_names (id INTEGER PRIMARY KEY, name TEXT UNIQUE)"
                 )
 
-        return self._connection_per_thread[id]
+        return self._connection_per_thread[tid]
 
     def create_table(self, table_name, data):
         cur = self.con.cursor()
@@ -493,9 +550,9 @@ class DataStore(object):
             cur.executemany(sql, data_without_headers)
         self.con.commit()
 
-    def _get_table_names_from_disk(self):
-        cur = self.con.cursor()
+    def _get_table_names_from_disk(self, has_datetime=None):
         try:
+            cur = self.con.cursor()
             cur.execute("SELECT name FROM sqlite_master WHERE type='table';")
         except sqlite3.ProgrammingError as ex:
             # sqlite3.ProgrammingError: Cannot operate on a closed database.
@@ -506,10 +563,22 @@ class DataStore(object):
                 raise ex
 
         table_names = [itm[0] for itm in cur.fetchall()]
-        # filter out the 'detector_names' table
-        # TODO: check that this is a sensible thing to do.  Maybe it would make sense to
-        # include a "data tables" property instead.  Check how this is being used.
-        table_names = [itm for itm in table_names if not itm == "detector_names"]
+        if has_datetime is None:
+            pass
+        elif has_datetime:
+            table_names = [
+                itm for itm in table_names if "Datetime" in self.get_column_names(itm)
+            ]
+        else:
+            table_names = [
+                itm
+                for itm in table_names
+                if not "Datetime" in self.get_column_names(itm)
+            ]
+        ## filter out the 'detector_names' table
+        ## TODO: check that this is a sensible thing to do.  Maybe it would make sense to
+        ## include a "data tables" property instead.  Check how this is being used.
+        ##table_names = [itm for itm in table_names if not itm == "detector_names"]
         return table_names
 
     @property
@@ -525,6 +594,16 @@ class DataStore(object):
     def tables(self):
         "a list of table names"
         return self._get_table_names_from_disk()
+
+    @property
+    def data_tables(self):
+        "a list of tables containing a 'Datetime' column (containing time data)"
+        return self._get_table_names_from_disk(has_datetime=True)
+
+    @property
+    def static_tables(self):
+        "a list of tables without a 'Datetime' column (static in time)"
+        return self._get_table_names_from_disk(has_datetime=False)
 
     def detector_id_from_name(self, detector_name):
         """Lookup the detector's ID from its name"""
@@ -549,7 +628,7 @@ class DataStore(object):
         datetime
             Update time according to the timestamp of the most recent time record.
             If the table has not yet been created, return None
-            
+
             TODO: (maybe) If there is not any time information in the table, fall back to returning
             the time of the last update in utc.
         """
@@ -557,7 +636,8 @@ class DataStore(object):
         cur = self.con.cursor()
         # note: can't combine 'max' with automatic conversion from timestamp
         # optimisation - run the query only on recent data
-        view_name = "Recent" + table_name
+        # view_name = "Recent" + table_name
+        view_name = table_name
         if detector_name is None:
             sql = f"select max(Datetime) from {view_name}"
         else:
@@ -566,12 +646,14 @@ class DataStore(object):
         most_recent_time = None
         try:
             tstr = tuple(cur.execute(sql).fetchall()[0])[0]
+            # tstr will be None if there are no rows in the database yet
             try:
                 most_recent_time = datetime.datetime.strptime(tstr, "%Y-%m-%d %H:%M:%S")
             except Exception as ex:
                 _logger.error(
                     f"Error parsing most recent time in database.  sql: {sql}, time string: '{tstr}'"
                 )
+                log_backtrace_all_threads()
         except sqlite3.OperationalError as ex:
             _logger.debug(f"SQL exception: {ex} while executing {sql}")
 
@@ -579,13 +661,22 @@ class DataStore(object):
             f"Executing SQL: {sql}, returned: {most_recent_time}, took: {datetime.datetime.utcnow()-t0}"
         )
         return most_recent_time
-    
+
     def get_minimum_time(self, table_name):
         """
         Return the earliest time in the table
 
          - slow (scan across all records)
         """
+        if table_name is None:
+            min_times = []
+            for table_name in self.tables:
+                if "Datetime" in self.get_column_names(table_name):
+                    min_times.append(self.get_minimum_time(table_name))
+            # TODO:decide what to do if there are no Datetime columns, depending on how this function is used
+            # currently min([]) --> raises ValueError
+            return min(min_times)
+
         t0 = datetime.datetime.utcnow()
         sql = f"select min(Datetime) from {table_name}"
         try:
@@ -606,7 +697,6 @@ class DataStore(object):
         )
         return min_time
 
-
     def get_rows(self, table_name, start_time, maxrows=1000, recent=True):
         """
         Get data from table beginning with start_time
@@ -616,44 +706,45 @@ class DataStore(object):
         """
         t0 = datetime.datetime.utcnow()
 
-        rowid_max = self.con.execute(f"select max(rowid) from {table_name}").fetchall()[
-            0
-        ]["max(rowid)"]
-        last_rowid = self._last_rowid.get(table_name, 0)
-        self._last_rowid[table_name] = rowid_max
+        try:  # protetect against "closed database" happening at any point in this code block
+            rowid_max = self.con.execute(
+                f"select max(rowid) from {table_name}"
+            ).fetchall()[0]["max(rowid)"]
+            last_rowid = self._last_rowid.get(table_name, 0)
+            self._last_rowid[table_name] = rowid_max
 
-        # create a temporary view which only contains the data seen since the last
-        using_a_view = False
-        if recent:
-            view_name = "recent_" + table_name
-            self.con.execute(f"drop view  if exists {view_name}")
-            self.con.execute(
-                f"create temp view {view_name} as select * from {table_name} where rowid > {last_rowid}"
-            )
-            using_a_view = True
-        else:
-            view_name = table_name
-
-        # Execute SQL along the lines of:
-        # SELECT * FROM tablename
-        # WHERE columname >='2012-12-25 00:00:00'
-        # AND columname <'2012-12-26 00:00:00'
-        # Note: this uses a subset (e.g. see https://stackoverflow.com/questions/7786570/get-another-order-after-limit)
-        if start_time is not None:
-            t_str = start_time.strftime("%Y-%m-%d %H:%M:%S")
-            sql = f"SELECT * from (SELECT * FROM {view_name} WHERE Datetime > '{t_str}' ORDER BY Datetime DESC LIMIT {maxrows}) as T1 order by Datetime ASC"
-        else:
-            sql = f"SELECT * from (SELECT * FROM {view_name} ORDER BY Datetime DESC LIMIT {maxrows}) as T1 ORDER BY Datetime ASC"
-        _logger.debug(f"Executing SQL: {sql}")
-        try:
-            cursor = self.con.execute(sql)
-        except sqlite3.OperationalError as ex:
-            # sqlite3.OperationalError: no such column: Datetime
-            if ex.args == ("no such column: Datetime",):
-                _logger.warning(f"Datetime column not found in table {view_name}")
-                return None, []
+            # create a temporary view which only contains the data seen since the last
+            using_a_view = False
+            if recent:
+                view_name = "recent_" + table_name
+                self.con.execute(f"drop view  if exists {view_name}")
+                self.con.execute(
+                    f"create temp view {view_name} as select * from {table_name} where rowid > {last_rowid}"
+                )
+                using_a_view = True
             else:
-                raise ex
+                view_name = table_name
+
+            # Execute SQL along the lines of:
+            # SELECT * FROM tablename
+            # WHERE columname >='2012-12-25 00:00:00'
+            # AND columname <'2012-12-26 00:00:00'
+            # Note: this uses a subset (e.g. see https://stackoverflow.com/questions/7786570/get-another-order-after-limit)
+            if start_time is not None:
+                t_str = start_time.strftime("%Y-%m-%d %H:%M:%S")
+                sql = f"SELECT * from (SELECT * FROM {view_name} WHERE Datetime > '{t_str}' ORDER BY Datetime DESC LIMIT {maxrows}) as T1 order by Datetime ASC"
+            else:
+                sql = f"SELECT * from (SELECT * FROM {view_name} ORDER BY Datetime DESC LIMIT {maxrows}) as T1 ORDER BY Datetime ASC"
+            _logger.debug(f"Executing SQL: {sql}")
+            try:
+                cursor = self.con.execute(sql)
+            except sqlite3.OperationalError as ex:
+                # sqlite3.OperationalError: no such column: Datetime
+                if ex.args == ("no such column: Datetime",):
+                    _logger.warning(f"Datetime column not found in table {view_name}")
+                    return None, []
+                else:
+                    raise ex
         except sqlite3.ProgrammingError as ex:
             # sqlite3.ProgrammingError: Cannot operate on a closed database.
             if ex.args == ("Cannot operate on a closed database.",):
@@ -687,7 +778,209 @@ class DataStore(object):
         )
 
         return t, data
-    
+
+    def get_archive_filename(self, data_dir, y, m):
+        fname = os.path.abspath(
+            os.path.join(data_dir, "archive", f"{y}-{m:02}-radon.db")
+        )
+        return fname
+
+    def get_archive_db(self, data_dir, y, m, con):
+        """
+        Return a filename, and a database connection where either:
+         - the database exists and has the same structure as the active database
+         - the database did not exist, but it has been created (empty) with the structure copied from the active database
+        """
+        # create database if needed
+        archive_dir = os.path.join(data_dir, "archive")
+        if not os.path.exists(archive_dir):
+            os.makedirs(archive_dir)
+        fname_archive_root = os.path.abspath(
+            os.path.join(data_dir, "archive", f"{y}-{m:02}-radon.db")
+        )
+        fname_archive = fname_archive_root
+        filename_counter = 0
+        existing_structure = self.get_structure_sql(con)
+
+        while True:
+            if not os.path.exists(fname_archive):
+                archive_exists = False
+                con_archive = sqlite3.connect(fname_archive)
+                break
+            con_archive = sqlite3.connect(fname_archive)
+            db_structure_matches = "".join(existing_structure) == "".join(
+                self.get_structure_sql(con_archive)
+            )
+            if db_structure_matches:
+                archive_exists = True
+                break
+            _logger.debug(f"Unable to use {fname_archive} as archive database")
+            filename_counter += 1
+            fname_archive = fname_archive_root + "." + str(filename_counter)
+            _logger.debug(f"Trying {fname_archive} as archive database")
+            if filename_counter > 60:
+                raise RuntimeError()
+
+        if not archive_exists:
+            # copy structure from source to destination db
+            _logger.debug(
+                f"Copying database structure into new database {fname_archive}"
+            )
+            with con_archive:
+                for (sql,) in con.execute(
+                    "select sql from sqlite_master where sql is not NULL"
+                ):
+                    _logger.debug(f"Executing sql: {sql}")
+                    con_archive.execute(sql)
+
+        # copy some tables in their entirety (these are assumed to be short)
+        # this is done even if the database already exists, in case of changes
+        with con_archive:
+            for table_name in self.static_tables:
+                con_archive.execute(f"DELETE FROM {table_name}")
+                _logger.debug(f"Copying table {table_name}")
+                for row in con.execute(f"select * from {table_name}"):
+                    con_archive.execute(
+                        f"insert into {table_name} values ({','.join('?'*len(row))})",
+                        row,
+                    )
+                _logger.debug(f"Finished copying table {table_name}")
+
+        return fname_archive, con_archive
+
+    def get_structure_sql(self, con):
+        return [
+            itm[0]
+            for itm in con.execute(
+                "select sql from sqlite_master where sql is not NULL"
+            ).fetchall()
+        ]
+
+    def archive_data(self, data_dir):
+        """
+        Move old data into archives
+        """
+        # open a plain connection to the live database (no type conversions etc)
+        con = sqlite3.connect(
+            self.data_file,
+        )
+
+        maximum_age = datetime.timedelta(days=35)
+        threshold_time = datetime.datetime.now() - maximum_age
+        # are there any records older than "threshold_time"?
+        database_mintime = self.get_minimum_time(None)
+        if not database_mintime < threshold_time:
+            _logger.debug(
+                f"No data old enough to archive (oldest data is from {database_mintime} but needs to be from earlier than {threshold_time}"
+            )
+            return
+        # iterate over all tables containing a DateTime column
+        for table_name in self.data_tables:
+            db_column_names = [
+                itm[1] for itm in con.execute(f"PRAGMA table_info({table_name})")
+            ]
+            db_column_names_sql = ",".join(db_column_names)
+            cursor = con.cursor()
+            for y, m in iter_months(database_mintime, threshold_time):
+                t0_query = datetime.datetime(y, m, 1, 0, 0, 0)
+                y1, m1 = next_year_month(y, m)
+                t1_query = datetime.datetime(y1, m1, 1, 0, 0, 0)
+
+                fname_archive, con_archive = self.get_archive_db(data_dir, y, m, con)
+                t0 = datetime.datetime.utcnow()
+                with con:
+                    cur = con.cursor()
+                    # 10 days of data at 1 sample/10 second
+                    # (controls the number of rwos returned by fecthmany)
+                    cur.arraysize = 14400 * 0
+                    with con_archive:
+                        # the steps here are (timing for 10-sec table)
+                        #  1. query (to find the rows to move, happens lazily and very quickly)
+                        #  2. copy rows (takes about 4.4 seconds)
+                        #  3. delete rows in activate database (takes about 1.1 seconds)
+                        a = time.time()
+                        rows = cur.execute(
+                            f'select {db_column_names_sql} from {table_name} WHERE Datetime >= "{t0_query.strftime(DBTFMT)}" and Datetime < "{t1_query.strftime(DBTFMT)}"'
+                        )
+                        print("TIMING1:", time.time() - a)
+                        a = time.time()
+                        count = 0
+                        sql = f"insert into {table_name} values ({','.join('?'*len(db_column_names))})"
+
+                        if False:
+                            # this is the simple, but slightly slower, version
+                            for count, row in enumerate(rows):
+                                con_archive.execute(sql, tuple(row))
+                            nrows = count + 1
+                        elif True:
+                            cur_archive = con_archive.cursor()
+                            cur_archive.executemany(sql, (tuple(itm) for itm in rows))
+                            nrows = cur_archive.rowcount
+                        else:
+                            # this is the faster, but slightly more complex, version
+                            while True:
+                                chunk = rows.fetchmany()
+                                print(len(chunk))
+                                if len(chunk) == 0:
+                                    break
+                                count += len(chunk)
+                                con_archive.executemany(sql, chunk)
+                            nrows = count
+                        print("TIMING2", time.time() - a)
+                        a = time.time()
+                        cur.execute(
+                            f'delete from {table_name} WHERE Datetime >= "{t0_query.strftime(DBTFMT)}" and Datetime < "{t1_query.strftime(DBTFMT)}"'
+                        )
+                        print("TIMING3", time.time() - a)
+                        ### - note I intended to do this in chunks, but the first approach I took wasn't working (no order by compiled into my sqlite delete clause)
+                        ### - just start by copying everything, and then change things if that is too slow.
+                        # # old code - intended to copy in chunks
+                        # rows = cur.execute(f'select * from {table_name} WHERE Datetime >= \"{t0_query.strftime(DBTFMT)}\" and Datetime < \"{t1_query.strftime(DBTFMT)}\" order by rowid limit 1000')
+
+                        # for count, row in enumerate(rows):
+                        #     # TODO: executemany with executemany(...).rowcount
+                        #     sql = f"insert into {table_name} values ({','.join('?'*len(row))})"
+                        #     con_archive.execute(sql, tuple(row))
+                        # nrows = count + 1
+                        # cur.execute(f'delete from {table_name} WHERE Datetime >= \"{t0_query.strftime(DBTFMT)}\" and Datetime < \"{t1_query.strftime(DBTFMT)}\" order by rowid limit 1000')
+                        # if nrows < 1000: # this means we're done
+                        #     break
+                _logger.info(
+                    f"Archiving data for {y}-{m:02} from table {table_name} ({nrows} rows) took {datetime.datetime.utcnow() - t0}"
+                )
+                # sleep to give other tasks a chance to access the database
+                time.sleep(0.25)
+
+    def backup_active_database(self, backup_fn=None):
+        """
+        Backup the active database
+        """
+        if not hasattr(self.con, "backup"):
+            _logger.warning(
+                "Database backup functionality requires Python version >= 3.7"
+            )
+        return
+
+        if backup_fn is None:
+            data_dir = self._config.data_dir
+            archive_dir = os.path.join(data_dir, "archive")
+            if not os.path.exists(archive_dir):
+                os.makedirs(archive_dir)
+            backup_fn = os.path.join(archive_dir, "radon-backup.db")
+
+        def progress(status, remaining, total):
+            _logger.debug(
+                f"Database backup copied {total-remaining} of {total} pages..."
+            )
+
+        _logger.debug(f"Backing up datastore to {backup_fn}")
+        con = self.con
+        bck = sqlite3.connect(backup_fn)
+        with bck:
+            # copy in 10 Mb chunks, sleep for .25 seconds
+            # in between each call to copy
+            con.backup(bck, pages=1024 * 10, progress=progress, sleep=0.25)
+        bck.close()
 
     def sync_legacy_files(self, data_dir):
         """
@@ -700,52 +993,41 @@ class DataStore(object):
         if data_dir is None:
             data_dir = self._config.data_dir
 
-        table_name = 'Results'
+        table_name = "Results"
 
-        tz_offset = datetime.timedelta(seconds = int(self._config.legacy_file_timezone*3600))
+        tz_offset = datetime.timedelta(
+            seconds=int(self._config.legacy_file_timezone * 3600)
+        )
         tmin_local = self.get_minimum_time(table_name) - tz_offset
         tmax_local = self.get_update_time(table_name, None) - tz_offset
 
         # define month names statically to prevent any interction with user's
         # local settings (from list(calendar.month_abbr) )
-        month_abbr = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-
-        def next_year_month(y,m):
-            m += 1
-            if m > 12:
-                m = 1
-                y += 1
-            return y,m
-
-        def iter_months(tmin,tmax):
-            """
-            >>> import datetime
-            >>> tmin = datetime.datetime(2005, 6, 12)
-            >>> tmax = datetime.datetime(2006, 2, 8)
-            >>> list(iter_months(tmin,tmax))
-            [(2005, 6),
-            (2005, 7),
-            (2005, 8),
-            (2005, 9),
-            (2005, 10),
-            (2005, 11),
-            (2005, 12),
-            (2006, 1),
-            (2006, 2)]
-            """
-            y = tmin.year
-            m = tmin.month
-            while y < tmax.year or m <= tmax.month:
-                yield y, m
-                y,m = next_year_month(y, m)
+        month_abbr = [
+            "",
+            "Jan",
+            "Feb",
+            "Mar",
+            "Apr",
+            "May",
+            "Jun",
+            "Jul",
+            "Aug",
+            "Sep",
+            "Oct",
+            "Nov",
+            "Dec",
+        ]
 
         # columns to retrieve
-        cols_to_skip = {'RecNbr', 'DetectorName', 'id', 'name'}
-        colnames = [itm for itm in self.get_column_names(table_name) if not itm in cols_to_skip]
+        cols_to_skip = {"RecNbr", "DetectorName", "id", "name"}
+        colnames = [
+            itm for itm in self.get_column_names(table_name) if not itm in cols_to_skip
+        ]
 
         def format_rec(row, headers=False):
             """format a row, if headers is True then format for headers
-            
+
             The format is intended to match this:
                 Year, DOY, Month, DOM, Time,  ExFlow, GM, InFlow, HV, Spare,LLD, ULD, TankP, Temp, AirT, RelHum, Press,  Batt, Comments, Flag
                 2020, 306,11,01,00:00, 45.42, 681, 8.12, 578.9, 2126, 1400, 0, 18.17, 34.56, 23.87, 63.83, 1009.168, 13.73,, 0
@@ -762,12 +1044,12 @@ class DataStore(object):
                         if itm.endswith("_Tot") or itm.endswith("_Avg"):
                             itm = itm[:-4]
                         output.append(itm)
-                output_str = ', '.join(output)
+                output_str = ", ".join(output)
                 # two spaces after 'Time' in the headers
-                output_str.replace('Time, ', 'Time,  ')
+                output_str.replace("Time, ", "Time,  ")
             else:
-                for k,itm in zip(row.keys(), row):
-                    assert(itm == row[k])
+                for k, itm in zip(row.keys(), row):
+                    assert itm == row[k]
                     if k == "Datetime":
                         itm = datetime.datetime.strptime(itm, DBTFMT)
                         doy = itm.timetuple().tm_yday
@@ -776,21 +1058,21 @@ class DataStore(object):
                     elif itm is not None:
                         output.append(str(itm))
                     else:
-                        output.append('')
-                output_str = ', '.join(output)
+                        output.append("")
+                output_str = ", ".join(output)
                 # match the quirk of the comment column
-                output_str = output_str.replace(', ,', ',,')
+                output_str = output_str.replace(", ,", ",,")
             return output_str
 
         # iterate over each month from t0 to t1
-        for y,m in iter_months(tmin_local,tmax_local):
+        for y, m in iter_months(tmin_local, tmax_local):
             # work out t
             # two digit year
             yy = y % 100
             m_txt = month_abbr[m]
-            t0_query = datetime.datetime(y,m,1,0,0,0) - tz_offset
-            y1,m1 = next_year_month(y, m)
-            t1_query = datetime.datetime(y1,m1,1,0,0,0) - tz_offset
+            t0_query = datetime.datetime(y, m, 1, 0, 0, 0) - tz_offset
+            y1, m1 = next_year_month(y, m)
+            t1_query = datetime.datetime(y1, m1, 1, 0, 0, 0) - tz_offset
 
             # TODO:
             # get detector names from database?
@@ -798,23 +1080,28 @@ class DataStore(object):
             for detector_config in self._config.detectors:
                 detector_name = detector_config.name
                 exec_t0 = datetime.datetime.utcnow()
-                sql = (f"SELECT {','.join(colnames)} from Results LEFT OUTER JOIN detector_names ON Results.DetectorName=detector_names.id "
-                    f"WHERE Datetime >= \"{t0_query.strftime(DBTFMT)}\" and Datetime < \"{t1_query.strftime(DBTFMT)}\" and name = \"{detector_name}\"")
-                
+                sql = (
+                    f"SELECT {','.join(colnames)} from Results LEFT OUTER JOIN detector_names ON Results.DetectorName=detector_names.id "
+                    f'WHERE Datetime >= "{t0_query.strftime(DBTFMT)}" and Datetime < "{t1_query.strftime(DBTFMT)}" and name = "{detector_name}"'
+                )
+
                 try:
                     data = self.con.execute(sql).fetchall()
                 except Exception as ex:
-                    _logger.error(f'Error ({ex}) while executing sql: {sql}')
+                    _logger.error(f"Error ({ex}) while executing sql: {sql}")
                     raise ex
-                _logger.debug(f'Executing sql: {sql} took {datetime.datetime.utcnow() - exec_t0}')
+                _logger.debug(
+                    f"Executing sql: {sql} took {datetime.datetime.utcnow() - exec_t0}"
+                )
                 numrows = len(data)
                 if numrows == 0:
                     # skip this file - no data
                     continue
-                fname = (detector_config.csv_file_pattern
-                                                    .replace('{MONTH}', m_txt)
-                                                    .replace('{YEAR}', f"{yy:02}")
-                                                    .replace('{NAME}', detector_name))
+                fname = (
+                    detector_config.csv_file_pattern.replace("{MONTH}", m_txt)
+                    .replace("{YEAR}", f"{yy:02}")
+                    .replace("{NAME}", detector_name)
+                )
                 fname = os.path.abspath(os.path.join(self._config.data_dir, fname))
                 # check - does the output file already exist and contain at least as many rows
                 #         as there are in the database query
@@ -823,24 +1110,26 @@ class DataStore(object):
                 csv_needs_update = True
                 if os.path.exists(fname):
                     file_size_mb = os.path.getsize(fname) / 1024 / 1024
-                    # if the file size is larger than 10 Mbytes, it is very 
+                    # if the file size is larger than 10 Mbytes, it is very
                     # unlikely that we want to overwrite it and loading a large
                     # file to count the lines might be slow or otherwise unwise
                     # The files we expect to see are more like 200 kBytes in size
-                    if file_size_mb > 10:
-                        _logger.error(f"Skipping output to {fname} because there is already a file on disk which is over 10 Mbytes in size ({file_size_mb} Mbytes)")
+                    if file_size_mb > 100:
+                        _logger.error(
+                            f"Skipping output to {fname} because there is already a file on disk which is over 100 Mbytes in size ({file_size_mb} Mbytes)"
+                        )
                         # bail out here to avoid loading the file
                         continue
 
-                    with open(fname, 'rt') as fd:
+                    with open(fname, "rt") as fd:
                         for count, _ in enumerate(fd):
                             pass
-                        numrows_in_file = count+1
-                        
-                    if numrows_in_file >= numrows+1:
+                        numrows_in_file = count + 1
+
+                    if numrows_in_file >= numrows + 1:
                         # file has one extra row, for headers
                         csv_needs_update = False
-                
+
                 if csv_needs_update:
                     _logger.info(f"Updating csv file {fname}")
                     # create a directory if necessary
@@ -849,14 +1138,12 @@ class DataStore(object):
                         _logger.info(f"Creating directory {dirname}")
                         os.makedirs(dirname)
 
-                    with open(fname, 'wt') as fd:
+                    with open(fname, "wt") as fd:
                         fd.write(format_rec(data[0], headers=True))
-                        fd.write('\n')
+                        fd.write("\n")
                         for row in data:
                             fd.write(format_rec(row))
-                            fd.write('\n')
-
-
+                            fd.write("\n")
 
     def shutdown(self):
         """call this before shutdown"""
@@ -866,6 +1153,36 @@ class DataStore(object):
 #%%
 
 if __name__ == "__main__":
+    import sys
+
+    def setup_logging(loglevel=logging.DEBUG):
+        """Setup basic logging
+
+        Args:
+            loglevel (int): minimum loglevel for emitting messages
+        """
+        # logformat = "[%(asctime)s] %(levelname)s:%(name)s:%(message)s"
+        logformat = "[%(levelname)1.1s %(asctime)s %(module)s:%(lineno)d %(threadName)s] %(message)s"
+        logging.basicConfig(
+            level=loglevel,
+            stream=sys.stdout,
+            format=logformat,
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+
+        # exclude messages for Pylink and Pycr1000
+        class Blacklist(logging.Filter):
+            def __init__(self):
+                self.blacklist = ["pycampbellcr1000", "pylink"]
+
+            def filter(self, record):
+                """return True to keep message"""
+                return not record.name in self.blacklist
+
+        for handler in logging.root.handlers:
+            handler.addFilter(Blacklist())
+
+    setup_logging()
 
     class TestConfig:
         data_file = "test.sqlite"
@@ -883,7 +1200,7 @@ if __name__ == "__main__":
 
     data = [
         {
-            "Datetime": datetime.datetime(2021, 10, 23, 12, 30),
+            "Datetime": datetime.datetime(2021, 9, 23, 12, 30),
             "RecNbr": 382393,
             "ExFlow_Tot": 0.0,
             "InFlow_Avg": -13.84,
@@ -920,6 +1237,12 @@ if __name__ == "__main__":
                                  limit 10"""
     ):
         print(dict(row))
+
+    #%%
+    ds.archive_data(".\data-archive-test")
+
+    #%%
+    ds.backup_activate_database(".\data-archive-test")
 
     #%%
     if False:
