@@ -170,7 +170,7 @@ class CalBoxLabjack:
         """Stop source-flush pump"""
         self.digital_output_state["activate_pump"] = False
         self.digital_output_state["activate_inject"] = False
-        _logger.info(f"Cal Box flush stopped")
+        _logger.info(f"Cal Box flush stopped and injection disabled")
         self._send_state_to_device()
 
     def start_background(self):
@@ -193,11 +193,11 @@ class CalBoxLabjack:
         self.digital_output_state["disable_stack_blower"] = False
         self.digital_output_state["disable_external_blower"] = False
         self.digital_output_state["disable_internal_blower"] = False
-        _logger.info(f"Cal Box entered background mode")
+        _logger.info(f"Cal Box left background mode")
         self._send_state_to_device()
 
     def reset_calibration(self):
-        """Cancel a running background (but leave background-related
+        """Cancel a running calibration (but leave background-related
         flags unchanged)"""
         self.reset_flush()
 

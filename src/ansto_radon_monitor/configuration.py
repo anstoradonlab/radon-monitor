@@ -281,6 +281,7 @@ def config_from_commandline(
 
 
 def config_from_yamlfile(filename):
+    _logger.info(f"Loading configuration from: {filename}")
     with open(filename, "rt") as fd:
         raw_cfg = yaml.safe_load(fd.read())
     config = parse_config(raw_cfg)

@@ -957,7 +957,7 @@ class DataStore(object):
         """
         if not hasattr(self.con, "backup"):
             _logger.warning(
-                "Database backup functionality requires Python version >= 3.7"
+                "Backing up the live database requires Python version >= 3.7"
             )
         return
 
