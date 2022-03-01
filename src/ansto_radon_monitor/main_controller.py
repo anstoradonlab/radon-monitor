@@ -404,3 +404,21 @@ class MainController(object):
 
     def stop_background(self):
         self._cal_system_task.cancel_background()
+
+    def schedule_recurring_calibration(
+        self, flush_duration, inject_duration, t0_cal, cal_interval
+    ):
+        self._cal_system_task.schedule_recurring_calibration(
+            flush_duration, inject_duration, t0_cal, cal_interval
+        )
+
+    def schedule_recurring_background(
+        self, duration, t0_background, background_interval
+    ):
+        self._cal_system_task.schedule_recurring_background(
+            duration, t0_background, background_interval
+        )
+
+    def cal_and_bg_is_scheduled(self):
+        """return true if it looks like a bg and cal are scheduled"""
+        return self._cal_system_task.cal_and_bg_is_scheduled()

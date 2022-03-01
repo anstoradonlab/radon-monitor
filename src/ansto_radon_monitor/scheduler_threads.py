@@ -255,13 +255,15 @@ class CalibrationUnitThread(DataThread):
         super().__init__(datastore, *args, **kwargs)
         self.name = "CalibrationUnitThread"
         self._labjack = None
-        self._data_table_name = "calibration_unit"
+        self._data_table_name = "CalibrationUnit"
 
         # lower numbers are higher priority
         # task priority is *also* used to identify tasks later, so that
         # pending cal and background can be cancelled by the user
         self._calibration_tasks_priority = 10
         self._background_tasks_priority = 15
+        self._schedule_a_cal_tasks_priority = 20
+        self._schedule_a_bg_tasks_priority = 25
         self._measurement_task_priority = 100
         self._connection_task_priority = -1000
 
@@ -281,19 +283,20 @@ class CalibrationUnitThread(DataThread):
 
     @task_description("Calibration unit: initialize")
     def connect_to_labjack(self, labjack_id, serialNumber):
-        try:
-            self._labjack = CalBoxLabjack(labjack_id, serialNumber=serialNumber)
-        except Exception as ex:
-            _logger.error(
-                "Unable to connect to calibration system LabJack using "
-                f"ID: {labjack_id} serial: {serialNumber}.  Retrying in 10sec."
-            )
-            self._scheduler.enter(
-                delay=10,
-                priority=self._connection_task_priority,  # needs to happend before anything else will work
-                action=self.connect_to_labjack,
-                kwargs={"labjack_id": labjack_id, "serialNumber": serialNumber},
-            )
+        with self._lock:
+            try:
+                self._labjack = CalBoxLabjack(labjack_id, serialNumber=serialNumber)
+            except Exception as ex:
+                _logger.error(
+                    "Unable to connect to calibration system LabJack using "
+                    f"ID: {labjack_id} serial: {serialNumber}.  Retrying in 10sec."
+                )
+                self._scheduler.enter(
+                    delay=10,
+                    priority=self._connection_task_priority,  # needs to happend before anything else will work
+                    action=self.connect_to_labjack,
+                    kwargs={"labjack_id": labjack_id, "serialNumber": serialNumber},
+                )
 
     @task_description("Calibration unit: flush source")
     def set_flush_state(self):
@@ -357,54 +360,54 @@ class CalibrationUnitThread(DataThread):
             time when flushing is due to start (UTC), or None (which means to start
             immediately), by default None
         """
-
-        _logger.debug(
-            f"run_calibration, parameters are flush_duration:{flush_duration}, inject_duration:{inject_duration}, start_time:{start_time}"
-        )
-
-        p = self._calibration_tasks_priority
-        if start_time is not None:
-            initial_delay_seconds = max(
-                0, (start_time - datetime.datetime.utcnow()).total_seconds()
+        with self._lock:
+            _logger.debug(
+                f"run_calibration, parameters are flush_duration:{flush_duration}, inject_duration:{inject_duration}, start_time:{start_time}"
             )
-        else:
-            initial_delay_seconds = 0
-        #
-        # begin flushing
-        self._scheduler.enter(
-            delay=initial_delay_seconds,
-            priority=p,
-            action=self.set_flush_state,
-        )
-        # start calibration *on* the half hour
-        sec_per_30min = 30 * 60
-        now = time.time()
-        # allow some wiggle room - if flush_duration will take us up to a few seconds past the half
-        # hour, just reduce flush_duration by a bit instead of postponing by another half hour
-        # this might happen (e.g) if we're starting the job using a task scheduler
-        wiggle_room = 10
-        delay_inject_start = (
-            next_interval(now + flush_duration - wiggle_room, sec_per_30min)
-            + flush_duration
-            - wiggle_room
-        )
 
-        # start injection
-        self._scheduler.enter(
-            delay=delay_inject_start,
-            priority=p,
-            action=self.set_inject_state,
-        )
+            p = self._calibration_tasks_priority
+            if start_time is not None:
+                initial_delay_seconds = max(
+                    0, (start_time - datetime.datetime.utcnow()).total_seconds()
+                )
+            else:
+                initial_delay_seconds = 0
+            #
+            # begin flushing
+            self._scheduler.enter(
+                delay=initial_delay_seconds,
+                priority=p,
+                action=self.set_flush_state,
+            )
+            # start calibration *on* the half hour
+            sec_per_30min = 30 * 60
+            now = time.time()
+            # allow some wiggle room - if flush_duration will take us up to a few seconds past the half
+            # hour, just reduce flush_duration by a bit instead of postponing by another half hour
+            # this might happen (e.g) if we're starting the job using a task scheduler
+            wiggle_room = 10
+            delay_inject_start = (
+                next_interval(now + flush_duration - wiggle_room, sec_per_30min)
+                + flush_duration
+                - wiggle_room
+            )
 
-        # stop injection
-        delay_inject_stop = delay_inject_start + inject_duration
-        self._scheduler.enter(
-            delay=delay_inject_stop,
-            priority=p,
-            action=self.set_default_state,
-        )
+            # start injection
+            self._scheduler.enter(
+                delay=delay_inject_start,
+                priority=p,
+                action=self.set_inject_state,
+            )
 
-        self.state_changed.set()
+            # stop injection
+            delay_inject_stop = delay_inject_start + inject_duration
+            self._scheduler.enter(
+                delay=delay_inject_stop,
+                priority=p,
+                action=self.set_default_state,
+            )
+
+            self.state_changed.set()
 
     def run_background(self, duration, start_time=None):
         """Run the calibration sequence - flush source, inject source
@@ -413,73 +416,159 @@ class CalibrationUnitThread(DataThread):
         ----------
         duration : float
             duration of background period (sec)
-        start_time : datetime.datetie or None, optional
+        start_time : datetime.datetime or None, optional
             time when flushing is due to start (UTC), or None (which means to start
             immediately), by default None
         """
-
-        p = self._background_tasks_priority
-        if start_time is not None:
-            initial_delay_seconds = max(
-                0, (start_time - datetime.datetime.utcnow()).total_seconds()
+        with self._lock:
+            p = self._background_tasks_priority
+            if start_time is not None:
+                initial_delay_seconds = max(
+                    0, (start_time - datetime.datetime.utcnow()).total_seconds()
+                )
+            else:
+                initial_delay_seconds = 0
+            #
+            # begin background
+            self._scheduler.enter(
+                delay=initial_delay_seconds,
+                priority=p,
+                action=self.set_background_state,
             )
-        else:
-            initial_delay_seconds = 0
-        #
-        # begin background
-        self._scheduler.enter(
-            delay=initial_delay_seconds,
-            priority=p,
-            action=self.set_background_state,
-        )
-        # reset the background flags
-        self._scheduler.enter(
-            delay=initial_delay_seconds + duration,
-            priority=p,
-            action=self.cancel_background,
-        )
+            # reset the background flags
+            self._scheduler.enter(
+                delay=initial_delay_seconds + duration,
+                priority=p,
+                action=self.cancel_background,
+            )
 
-        self.state_changed.set()
+            self.state_changed.set()
 
     @task_description("Calibration unit: cancel calibration")
     def cancel_calibration(self):
         """cancel an in-progress calibration and all pending ones"""
-        tasks_to_remove = [
-            itm
-            for itm in self._scheduler.queue
-            if itm.priority == self._calibration_tasks_priority
-        ]
-        for itm in tasks_to_remove:
-            self._scheduler.cancel(itm)
+        with self._lock:
+            tasks_to_remove = [
+                itm
+                for itm in self._scheduler.queue
+                if itm.priority == self._calibration_tasks_priority
+                or itm.priority == self._schedule_a_cal_tasks_priority
+            ]
+            for itm in tasks_to_remove:
+                self._scheduler.cancel(itm)
 
-        # schedule a task to reset the cal box
-        self._scheduler.enter(
-            delay=0,
-            priority=0,
-            action=self.set_noncalibration_state,
-        )
+            # schedule a task to reset the cal box
+            self._scheduler.enter(
+                delay=0,
+                priority=0,
+                action=self.set_noncalibration_state,
+            )
 
-        self.state_changed.set()
+            self.state_changed.set()
+
+    @task_description("Calibration unit: schedule recurring calibration")
+    def schedule_recurring_calibration(
+        self,
+        flush_duration: float,
+        inject_duration: float,
+        first_start_time: datetime.datetime,
+        interval: datetime.timedelta,
+    ):
+        with self._lock:
+            # ensure first_start_time is in the future
+            now = datetime.datetime.utcnow()
+            ii = 0
+            maxiter = 365 * 2050
+            while first_start_time < now:
+                first_start_time += interval
+                ii += 1
+                # try not to hang for ever on bad inputs
+                if ii > maxiter:
+                    _logger.error(
+                        "Unable to schedule recurring calibration (inputs were: flush_duration={inject_duration}, flush_duration={inject_duration}, first_start_time={first_start_time}, interval={interval}"
+                    )
+                    return
+            self.run_calibration(
+                flush_duration, inject_duration, start_time=first_start_time
+            )
+            _logger.info(
+                f"Next scheduled calibration (flush: {flush_duration/3600.0}, inject: {inject_duration/3600.} hours) scheduled for {first_start_time} UTC."
+            )
+
+            # After the next calibration has completed, schedule the next one
+            sched_time = first_start_time + datetime.timedelta(
+                seconds=int(flush_duration + inject_duration)
+            )
+            scheduler_delay_seconds = max(
+                0, (sched_time - datetime.datetime.utcnow()).total_seconds()
+            )
+            self._scheduler.enter(
+                delay=scheduler_delay_seconds,
+                priority=self._schedule_a_cal_tasks_priority,
+                action=self.schedule_recurring_calibration,
+                argument=(flush_duration, inject_duration, first_start_time, interval),
+            )
+
+    @task_description("Calibration unit: schedule recurring background")
+    def schedule_recurring_background(
+        self,
+        duration: float,
+        first_start_time: datetime.datetime,
+        interval: datetime.timedelta,
+    ):
+        with self._lock:
+            # ensure first_start_time is in the future
+            now = datetime.datetime.utcnow()
+            ii = 0
+            maxiter = 365 * 2050
+            while first_start_time < now:
+                first_start_time += interval
+                ii += 1
+                # try not to hang for ever on bad inputs
+                if ii > maxiter:
+                    _logger.error(
+                        "Unable to schedule recurring background (inputs were: duration={duration}, first_start_time={first_start_time}, interval={interval}"
+                    )
+                    return
+
+            self.run_background(duration, start_time=first_start_time)
+            _logger.info(
+                f"Next scheduled background ({duration/3600.0} hours) scheduled for {first_start_time} UTC."
+            )
+
+            # After the next background has completed, schedule the next one
+            sched_time = first_start_time + datetime.timedelta(seconds=int(duration))
+            scheduler_delay_seconds = max(
+                0, (sched_time - datetime.datetime.utcnow()).total_seconds()
+            )
+            self._scheduler.enter(
+                delay=scheduler_delay_seconds,
+                priority=self._schedule_a_bg_tasks_priority,
+                action=self.schedule_recurring_background,
+                argument=(duration, first_start_time, interval),
+            )
 
     @task_description("Calibration unit: cancel calibration")
     def cancel_background(self):
         """cancel an in-progress calibration and all pending ones"""
-        tasks_to_remove = [
-            itm
-            for itm in self._scheduler.queue
-            if itm.priority == self._background_tasks_priority
-        ]
-        for itm in tasks_to_remove:
-            self._scheduler.cancel(itm)
+        with self._lock:
+            tasks_to_remove = [
+                itm
+                for itm in self._scheduler.queue
+                if itm.priority == self._background_tasks_priority
+                or itm.priority == self._schedule_a_bg_tasks_priority
+            ]
+            for itm in tasks_to_remove:
+                self._scheduler.cancel(itm)
 
-        # schedule a task to reset the cal box
-        self._scheduler.enter(
-            delay=0,
-            priority=0,
-            action=self.set_nonbackground_state,
-        )
+            # schedule a task to reset the cal box
+            self._scheduler.enter(
+                delay=0,
+                priority=0,
+                action=self.set_nonbackground_state,
+            )
 
-        self.state_changed.set()
+            self.state_changed.set()
 
     @property
     def status(self):
@@ -490,6 +579,22 @@ class CalibrationUnitThread(DataThread):
             status = self._labjack.status
 
         return status
+
+    def cal_and_bg_is_scheduled(self):
+        """return true if it looks like a bg and cal are scheduled"""
+        with self._lock:
+            scheduled_cal_bg_tasks = [
+                itm
+                for itm in self._scheduler.queue
+                if itm.priority == self._schedule_a_bg_tasks_priority
+                or itm.priority == self._schedule_a_cal_tasks_priority
+            ]
+        n = len(scheduled_cal_bg_tasks)
+        if n == 1 or n > 2:
+            _logger.warning(
+                f"Unexpected number of scheduled background & calibration tasks ({n}) - the scheduler may be in an inconsistent state"
+            )
+        return n >= 2
 
 
 def fix_record(record: Dict):
