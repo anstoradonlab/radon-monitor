@@ -300,10 +300,12 @@ class CalibrationUnitThread(DataThread):
 
     @task_description("Calibration unit: flush source")
     def set_flush_state(self):
+        self._datastore.add_log_message("CalibrationEvent", f"Begun flushing radon calibration source")
         self._labjack.flush()
 
     @task_description("Calibration unit: inject from source")
     def set_inject_state(self):
+        self._datastore.add_log_message("CalibrationEvent", f"Begun injecting radon from calibration source")
         # cancel background - so that we are not injecting
         # while flow is turned off (which would lead to a very
         # high radon concentration in the detector)
@@ -312,16 +314,20 @@ class CalibrationUnitThread(DataThread):
 
     @task_description("Calibration unit: switch to background state")
     def set_background_state(self):
+        self._datastore.add_log_message("CalibrationEvent", f"Begun background cycle")
         self._labjack.start_background()
 
     @task_description("Calibration unit: return to idle")
     def set_default_state(self):
+        self._datastore.add_log_message("CalibrationEvent", f"Return to normal operation")
         self._labjack.reset_all()
 
     def set_nonbackground_state(self):
+        self._datastore.add_log_message("CalibrationEvent", f"Left background state")
         self._labjack.reset_background()
 
     def set_noncalibration_state(self):
+        self._datastore.add_log_message("CalibrationEvent", f"Left calibration state")
         self._labjack.reset_calibration()
 
     def measurement_func(self):
@@ -363,6 +369,11 @@ class CalibrationUnitThread(DataThread):
         with self._lock:
             _logger.debug(
                 f"run_calibration, parameters are flush_duration:{flush_duration}, inject_duration:{inject_duration}, start_time:{start_time}"
+            )
+            log_start_time = start_time if start_time is not None else 'now'
+            self._datastore.add_log_message(
+                "CalibrationEvent",
+                f"Calibration scheduled, start_time: {log_start_time}, flush_duration:{flush_duration}, inject_duration:{inject_duration}, start_time:{start_time}",
             )
 
             p = self._calibration_tasks_priority
@@ -421,6 +432,11 @@ class CalibrationUnitThread(DataThread):
             immediately), by default None
         """
         with self._lock:
+            log_start_time = start_time if start_time is not None else 'now'
+            self._datastore.add_log_message(
+                "CalibrationEvent",
+                f"Background scheduled, start time: {log_start_time}, duration: {duration}",
+            )
             p = self._background_tasks_priority
             if start_time is not None:
                 initial_delay_seconds = max(
@@ -448,6 +464,9 @@ class CalibrationUnitThread(DataThread):
     def cancel_calibration(self):
         """cancel an in-progress calibration and all pending ones"""
         with self._lock:
+            self._datastore.add_log_message(
+                "CalibrationEvent", f"Cancelling any pending background cycles"
+            )
             tasks_to_remove = [
                 itm
                 for itm in self._scheduler.queue
@@ -548,10 +567,13 @@ class CalibrationUnitThread(DataThread):
                 argument=(duration, first_start_time, interval),
             )
 
-    @task_description("Calibration unit: cancel calibration")
+    @task_description("Calibration unit: cancel background")
     def cancel_background(self):
-        """cancel an in-progress calibration and all pending ones"""
+        """cancel an in-progress background and all pending ones"""
         with self._lock:
+            self._datastore.add_log_message(
+                "CalibrationEvent", f"Cancelling any pending calibration cycles"
+            )
             tasks_to_remove = [
                 itm
                 for itm in self._scheduler.queue

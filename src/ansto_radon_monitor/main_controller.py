@@ -237,6 +237,8 @@ class MainController(object):
         self._shutting_down = False
         self._configuration = configuration
         self._start_threads()
+        self.datastore.add_log_message("SystemEvent", "Startup")
+        self.datastore.add_log_message("ConfigurationDump", configuration.as_text())
 
     def _start_threads(self):
         with self._thread_list_lock:
@@ -292,6 +294,7 @@ class MainController(object):
         """
         Stop all activity in threads
         """
+        self.datastore.add_log_message("SystemEvent", "Shutdown")
         self._shutting_down = True
         _logger.debug("Asking threads to shut down.")
         for itm in self._threads:

@@ -8,6 +8,7 @@ import copy
 import datetime
 import logging
 import pathlib
+import pprint
 import sys
 import typing
 from dataclasses import dataclass, field
@@ -94,6 +95,9 @@ class Configuration:
     legacy_file_timezone: float = 0
     detectors: typing.List[DetectorConfig] = field(default_factory=list)
     calbox: CalUnitConfig = CalUnitConfig()
+
+    def as_text(self):
+        return pprint.pformat(self)
 
 
 def parse_config(raw_cfg):

@@ -481,6 +481,14 @@ class DataStore(object):
             self.con.execute(sql)
         self.con.commit()
 
+    def add_log_message(self, event_type, event_text):
+        table_name = "LogMessages"
+        t = datetime.datetime.utcnow()
+        # floor to nearest second
+        t = datetime.datetime(*t.timetuple()[:6])
+        data = {"Datetime": t, "EventType": event_type, "EventData": event_text}
+        self.add_record(table_name, data)
+
     def add_record(self, table_name, data):
         self.add_records(table_name, [data])
 
