@@ -300,12 +300,16 @@ class CalibrationUnitThread(DataThread):
 
     @task_description("Calibration unit: flush source")
     def set_flush_state(self):
-        self._datastore.add_log_message("CalibrationEvent", f"Begun flushing radon calibration source")
+        self._datastore.add_log_message(
+            "CalibrationEvent", f"Begun flushing radon calibration source"
+        )
         self._labjack.flush()
 
     @task_description("Calibration unit: inject from source")
     def set_inject_state(self):
-        self._datastore.add_log_message("CalibrationEvent", f"Begun injecting radon from calibration source")
+        self._datastore.add_log_message(
+            "CalibrationEvent", f"Begun injecting radon from calibration source"
+        )
         # cancel background - so that we are not injecting
         # while flow is turned off (which would lead to a very
         # high radon concentration in the detector)
@@ -319,7 +323,9 @@ class CalibrationUnitThread(DataThread):
 
     @task_description("Calibration unit: return to idle")
     def set_default_state(self):
-        self._datastore.add_log_message("CalibrationEvent", f"Return to normal operation")
+        self._datastore.add_log_message(
+            "CalibrationEvent", f"Return to normal operation"
+        )
         self._labjack.reset_all()
 
     def set_nonbackground_state(self):
@@ -370,7 +376,7 @@ class CalibrationUnitThread(DataThread):
             _logger.debug(
                 f"run_calibration, parameters are flush_duration:{flush_duration}, inject_duration:{inject_duration}, start_time:{start_time}"
             )
-            log_start_time = start_time if start_time is not None else 'now'
+            log_start_time = start_time if start_time is not None else "now"
             self._datastore.add_log_message(
                 "CalibrationEvent",
                 f"Calibration scheduled, start_time: {log_start_time}, flush_duration:{flush_duration}, inject_duration:{inject_duration}, start_time:{start_time}",
@@ -432,7 +438,7 @@ class CalibrationUnitThread(DataThread):
             immediately), by default None
         """
         with self._lock:
-            log_start_time = start_time if start_time is not None else 'now'
+            log_start_time = start_time if start_time is not None else "now"
             self._datastore.add_log_message(
                 "CalibrationEvent",
                 f"Background scheduled, start time: {log_start_time}, duration: {duration}",
@@ -648,6 +654,8 @@ class DataLoggerThread(DataThread):
         self.name = "DataLoggerThread"
         self.detectorName = detector_config.name
         self.tables = []
+        # set this to a long time ago
+        self._last_time_check = datetime.datetime.min
 
         self._scheduler.enter(
             delay=0,
@@ -659,7 +667,7 @@ class DataLoggerThread(DataThread):
         # ensure that the scheduler function is run immediately on startup
         self.state_changed.set()
 
-    @task_description("Calibration unit: initialize")
+    @task_description("Data logger: initialize")
     def connect_to_datalogger(self, detector_config):
         with self._lock:
             self._datalogger: CR1000 = CR1000.from_url(
@@ -685,6 +693,9 @@ class DataLoggerThread(DataThread):
                 _logger.info(
                     f"Connected to datalogger (serial {self.status['serial']}) using serial port, baudrate: {self._datalogger.pakbus.link.baudrate}"
                 )
+
+            # set this to a long time ago
+            self._last_time_check = datetime.datetime.min
 
     def measurement_func(self):
         # TODO: handle lost connection
@@ -716,10 +727,90 @@ class DataLoggerThread(DataThread):
                             self._datastore.add_record(destination_table_name, itm)
         self.status["link"] = "connected"
 
+        # include the clock check as part of the measurement function
+        if datetime.datetime.now() - self._last_time_check > datetime.timedelta(
+            days=15
+        ):
+            self.synchronise_clock()
+            self.log_status()
+            self._last_time_check = datetime.datetime.now()
+
+    def log_status(self):
+        progstat = self._datalogger.getprogstat()
+        self._datastore.add_log_message(
+            "LoggerStatusCheck",
+            f"Detector: {self.detectorName}, {pprint.pformat(stat)}",
+        )
+        # TODO: work out which file is running from progstat
+        fname = "Blah.cr10"
+        data_file = self._datalogger.getfile(fname)
+        self._datastore.add_log_message(
+            "LoggerFirmware", f"Detector: {self.detectorName}, \n{data_file}"
+        )
+
+    def get_clock_offset(self):
+        """
+        return datalogger time minus computer time, in seconds, as well
+        as 1/2 the time it took to query the datalogger
+        """
+        # measure the length of time required to query the datalogger clock
+        # -- first query it, in case of slow response due to power saving
+        # -- mode or some such
+        t_datalogger = self._datalogger.gettime()
+        tick = time.time()
+        t_datalogger = self._datalogger.gettime()
+        t_computer = datetime.datetime.utcnow()
+        tock = time.time()
+        time_required_for_query = tock - tick
+        halfquery = datetime.timedelta(seconds=time_required_for_query / 2.0)
+        # estimate that the actual time on the datalogger probably happend
+        # a short time ago
+        t_datalogger = t_datalogger - halfquery
+        clock_offset = (t_datalogger - t_computer).total_seconds()
+
+        return clock_offset, halfquery
+
+    def synchronise_clock(
+        self, maximum_time_difference_seconds=10, check_ntp_sync=True
+    ):
+        """Attempt to synchronise the clock on the datalogger with computer."""
+        # NOTE: the api for adjusting the datalogger clock isn't accurate beyond 1 second
+        # TODO: maybe improve this situation
+        minimum_time_difference_seconds = 1
+        # TODO: check that the computer time is reliable, i.e. NTP sync
+        #
+        ntp_sync_ok = "unknown"  # TODO: flag this as true or false
+        clock_offset, halfquery = self.get_clock_offset()
+        self._datastore.add_log_message(
+            "ClockCheck",
+            f"Computer synced with network time: {ntp_sync_ok}, time difference (datalogger minus computer): {clock_offset}, detector: {self.detectorName}",
+        )
+        if (
+            maximum_time_difference_seconds is not None
+            and clock_offset > maximum_time_difference_seconds
+        ):
+            # don't touch the clock - something is amiss
+            _logger.error(
+                f"Datalogger and computer clocks are out of synchronisation by more than {maximum_time_difference_seconds} seconds, not adjusting time"
+            )
+        elif (
+            maximum_time_difference_seconds is not None
+            and clock_offset < minimum_time_difference_seconds
+        ):
+            _logger.info(
+                f"Datalogger and computer clocks are out of synchronisation by less than {minimum_time_difference_seconds} seconds, not adjusting time"
+            )
+        else:
+            new_time = datetime.datetime.utcnow() + halfquery
+            self._datalogger.settime(new_time)
+            clock_offset, halfquery = self.get_clock_offset()
+            self._datastore.add_log_message(
+                "ClockCheck",
+                f"Synchronised datalogger clock with computer clock, time difference (datalogger minus computer): {clock_offset}, detector: {self.detectorName}",
+            )
+
 
 # TODO: refactor so this class is very similar to the one above
-
-
 class MockDataLoggerThread(DataThread):
     def __init__(self, detector_config, *args, **kwargs):
         super().__init__(*args, **kwargs)
