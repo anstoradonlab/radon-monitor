@@ -233,6 +233,8 @@ class MainController(object):
     def __init__(self, configuration: Configuration):
         self._thread_list_lock = threading.RLock()
         self.datastore = DataStore(configuration)
+        # a flag used to signal that the controller is shutting down
+        self._shutting_down = False
         self._configuration = configuration
         self._start_threads()
 
@@ -290,6 +292,7 @@ class MainController(object):
         """
         Stop all activity in threads
         """
+        self._shutting_down = True
         _logger.debug("Asking threads to shut down.")
         for itm in self._threads:
             itm.shutdown()
@@ -341,6 +344,8 @@ class MainController(object):
         reference_time : [type]
             [description]
         """
+        if self._shutting_down:
+            return (None, [])
         t, data = self.datastore.get_rows(table, start_time)
         return t, data
 

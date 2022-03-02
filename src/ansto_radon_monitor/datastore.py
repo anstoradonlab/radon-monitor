@@ -706,7 +706,17 @@ class DataStore(object):
         """
         t0 = datetime.datetime.utcnow()
 
-        try:  # protetect against "closed database" happening at any point in this code block
+        # protect against "closed database" happening at any point in this code block
+        try:
+            # load detector names into a dict
+            detector_names_dict = {}
+            try:
+                rows = self.con.execute("select * from detector_names")
+                for r in rows:
+                    detector_names_dict[r["id"]] = r["name"]
+            except Exception as e:
+                _logger.error(f'Unable to read "detector_names" table, error: {e}')
+
             rowid_max = self.con.execute(
                 f"select max(rowid) from {table_name}"
             ).fetchall()[0]["max(rowid)"]
@@ -755,6 +765,16 @@ class DataStore(object):
 
         # convert sqlite3.Row objects into plain python dicts
         data = [dict(itm) for itm in cursor]
+        # convert detector ids to their full names
+        def lookup_name(row):
+            if "DetectorName" in row.keys():
+                detector_id = row["DetectorName"]
+                detector_name = detector_names_dict.get(detector_id, detector_id)
+                row["DetectorName"] = detector_name
+            return row
+
+        data = [lookup_name(itm) for itm in data]
+
         if len(data) == 0:
             # no data obtained, so t is unchanged
             t = start_time
