@@ -4,6 +4,7 @@ import datetime
 import functools
 import logging
 import math
+import pprint
 import sched
 import sys
 import threading
@@ -313,7 +314,7 @@ class CalibrationUnitThread(DataThread):
         # cancel background - so that we are not injecting
         # while flow is turned off (which would lead to a very
         # high radon concentration in the detector)
-        self._labjack.cancel_background()
+        self._labjack.reset_background()
         self._labjack.inject()
 
     @task_description("Calibration unit: switch to background state")
@@ -397,17 +398,25 @@ class CalibrationUnitThread(DataThread):
                 action=self.set_flush_state,
             )
             # start calibration *on* the half hour
-            sec_per_30min = 30 * 60
-            now = time.time()
-            # allow some wiggle room - if flush_duration will take us up to a few seconds past the half
-            # hour, just reduce flush_duration by a bit instead of postponing by another half hour
-            # this might happen (e.g) if we're starting the job using a task scheduler
-            wiggle_room = 10
-            delay_inject_start = (
-                next_interval(now + flush_duration - wiggle_room, sec_per_30min)
-                + flush_duration
-                - wiggle_room
-            )
+            #### --- commented out, assume that the calling code will
+            #### --- take care of this, and that sometimes users will
+            #### --- want to start calibrations right away to see the
+            #### --- valves open and close and so forth
+            start_on_half_hour = False
+            if start_on_half_hour:
+                sec_per_30min = 30 * 60
+                now = time.time()
+                # allow some wiggle room - if flush_duration will take us up to a few seconds past the half
+                # hour, just reduce flush_duration by a bit instead of postponing by another half hour
+                # this might happen (e.g) if we're starting the job using a task scheduler
+                wiggle_room = 10
+                delay_inject_start = (
+                    next_interval(now + flush_duration - wiggle_room, sec_per_30min)
+                    + flush_duration
+                    - wiggle_room
+                )
+            else:
+                delay_inject_start = flush_duration
 
             # start injection
             self._scheduler.enter(
@@ -461,7 +470,7 @@ class CalibrationUnitThread(DataThread):
             self._scheduler.enter(
                 delay=initial_delay_seconds + duration,
                 priority=p,
-                action=self.cancel_background,
+                action=self.set_nonbackground_state,
             )
 
             self.state_changed.set()
@@ -667,12 +676,15 @@ class DataLoggerThread(DataThread):
         # ensure that the scheduler function is run immediately on startup
         self.state_changed.set()
 
+    def _connect(self, detector_config):
+        self._datalogger: CR1000 = CR1000.from_url(
+            detector_config.serial_port, timeout=2
+        )
+
     @task_description("Data logger: initialize")
     def connect_to_datalogger(self, detector_config):
         with self._lock:
-            self._datalogger: CR1000 = CR1000.from_url(
-                detector_config.serial_port, timeout=2
-            )
+            self._connect(detector_config)
             # TODO: handle 'unable to connect' error
             self.tables = [str(itm, "ascii") for itm in self._datalogger.list_tables()]
             # Filter the tables - only include the ones which are useful
@@ -702,8 +714,12 @@ class DataLoggerThread(DataThread):
         self.status["link"] = "retrieving data"
         with self._lock:
             for table_name in self.tables:
-                destination_table_name = self._config.name + "_" + table_name
-                update_time = self._datastore.get_update_time(destination_table_name)
+                # it's possible to send data from each datalogger to a separate table.
+                # destination_table_name = self._config.name + "_" + table_name
+                destination_table_name = table_name
+                update_time = self._datastore.get_update_time(
+                    destination_table_name, self.detectorName
+                )
                 if update_time is not None:
                     update_time += datetime.timedelta(seconds=1)
 
@@ -723,7 +739,7 @@ class DataLoggerThread(DataThread):
 
                         for itm in data:
                             itm = fix_record(itm)
-                            itm["detector_name"] = self._config.name
+                            itm["DetectorName"] = self._config.name
                             self._datastore.add_record(destination_table_name, itm)
         self.status["link"] = "connected"
 
@@ -739,7 +755,7 @@ class DataLoggerThread(DataThread):
         progstat = self._datalogger.getprogstat()
         self._datastore.add_log_message(
             "LoggerStatusCheck",
-            f"Detector: {self.detectorName}, {pprint.pformat(stat)}",
+            f"Detector: {self.detectorName}, {pprint.pformat(progstat)}",
         )
         # TODO: work out which file is running from progstat
         fname = "Blah.cr10"
@@ -810,48 +826,50 @@ class DataLoggerThread(DataThread):
             )
 
 
-# TODO: refactor so this class is very similar to the one above
-class MockDataLoggerThread(DataThread):
-    def __init__(self, detector_config, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.measurement_interval: int = 5  # TODO: from config?, this is in seconds
-        self._config = detector_config
-        self._datalogger = None
-        self.status = {"link": "connecting to mock datalogger", "serial": None}
-        self.name = "MockDataLoggerThread"
-        self.detectorName = detector_config.name
-        self.tables = []
+class MockCR1000(object):
+    """
+    This object simulates some of the CR1000 interface to permit testing the rest of the code
+    """
+
+    class PakBus:
+        link = {"baudrate": 42}
+
+    pakbus = PakBus()
+
+    def __init__(self, *args, **kwargs):
+        # for faking a clock offset
+        self.__timeoffset = datetime.timedelta(seconds=3)
         self._rec_nbr = {"RTV": 0, "Results": 0}
-        self.most_recent_time = {}
+        pass
 
-        # throw an error after executing for a while
-        self.throw_an_error = False
-        self.t_first_alive = datetime.datetime.utcnow()
+    def list_tables(self):
+        return [b"Results", b"RTV"]
 
-        self._scheduler.enter(
-            delay=0,
-            priority=-1000,  # needs to happend before anything else will work
-            action=self.connect_to_datalogger,
-            kwargs={"detector_config": detector_config},
+    def gettime(self):
+        time.sleep(0.01)
+        t = datetime.datetime.utcnow() + self.__timeoffset
+        t = datetime.datetime(*t.timetuple()[:6])
+        time.sleep(0.01)
+        return t
+
+    def settime(self, t):
+        time.sleep(0.01)
+        self.__timeoffset = datetime.datetime.utcnow() - t
+        time.sleep(0.01)
+
+    def getprogstat(self):
+        return {"SerialNbr": "42", "Kind": "MOCK"}
+
+    def getfile(self, fname):
+        data = f"this is some file data\n\nFilename requested was: {fname}".encode(
+            "ascii"
         )
+        return data
 
-        # ensure that the scheduler function is run immediately on startup
-        self.state_changed.set()
+    def close(self):
+        pass
 
-    @task_description("Calibration unit: initialize")
-    def connect_to_datalogger(self, detector_config):
-        with self._lock:
-            time.sleep(5)  # simulate talking to datalogger
-            self.tables = ["Results", "RTV"]
-            self.status["link"] = "connected"
-            self.status["serial"] = "MOCK001"
-            self.status["link"] = "connected"
-            self.status["serial"] = int(42)
-            _logger.info(
-                f"Connected to MOCK datalogger (serial {self.status['serial']})"
-            )
-
-    def mock_data_generator(self, table_name, start_date):
+    def get_data_generator(self, table_name, start_date):
         """define some mock data which looks like it came from a datalogger
 
         This behaves in a similar way to CR1000.get_data_generator
@@ -944,49 +962,15 @@ class MockDataLoggerThread(DataThread):
         if len(recs_to_return) > 0:
             yield recs_to_return
 
-    def measurement_func(self):
-        # TODO: handle lost connection
-        self.status["link"] = "retrieving data"
-        if self.throw_an_error:
-            if (datetime.datetime.utcnow() - self.t_first_alive) > datetime.timedelta(
-                seconds=120
-            ):
-                raise RuntimeError("This should be an unhandled error.")
-        with self._lock:
-            for table_name in self.tables:
-                destination_table_name = table_name
-                update_time = self._datastore.get_update_time(
-                    destination_table_name, self._config.name
-                )
-                if self.most_recent_time.get(table_name, None) is None:
-                    self.most_recent_time[table_name] = update_time
-                assert self.most_recent_time[table_name] == update_time
-                if update_time is not None:
-                    update_time += datetime.timedelta(seconds=1)
 
-                for data in self.mock_data_generator(
-                    table_name, start_date=update_time
-                ):
-                    # it is Ok for this loop to take a long time to execute - the datalogger is slow
-                    self.update_heartbeat_time()
-                    # return early if another task is trying to execute
-                    # (likely this is a shutdown request)
-                    if self.state_changed.is_set():
-                        return
-                    if len(data) > 0:
-                        # data times
-                        td0 = data[0]["Datetime"]
-                        td1 = data[-1]["Datetime"]
-                        self.most_recent_time[table_name] = td1
-                        _logger.debug(
-                            f"Received data ({len(data)} records from interval {td0}--{td1}) from table {destination_table_name} with start_date = {update_time}."
-                        )
-                        data = [fix_record(itm) for itm in data]
-                        for itm in data:
-                            itm["DetectorName"] = self._config.name
+class MockDataLoggerThread(DataLoggerThread):
+    def __init__(self, detector_config, *args, **kwargs):
+        super().__init__(detector_config, *args, **kwargs)
 
-                        self._datastore.add_records(destination_table_name, data)
-        self.status["link"] = "connected"
+    def _connect(self, detector_config):
+        time.sleep(4)  # simulate delay for comms
+        self._datalogger = MockCR1000()
+        _logger.warning("*** Pretend connection to a datalogger ***")
 
 
 class DataMinderThread(DataThread):
@@ -1016,7 +1000,7 @@ class DataMinderThread(DataThread):
         # perform some tasks a short time after startup
         # TODO: obtain backup time from configuration file
         backup_time_of_day = datetime.time(0, 10)
-        delay_seconds = 1 * 60
+        delay_seconds = 10 * 60
         self._scheduler.enter(
             delay=delay_seconds,
             priority=0,

@@ -163,6 +163,7 @@ class MonitorThread(threading.Thread):
         super().__init__(*args, **kwargs)
         self._main_controller = main_controller
         self.name = "MonitorThread"
+        self.status = ""  # nothing to report unless things all go bad!
         self.cancelled = False
         self.state_changed = threading.Event()
 
@@ -362,16 +363,34 @@ class MainController(object):
         """
         return a tree of status information
         """
+        summary_dict = {}
         status = {}
+        detector_names = []
         for t in self._threads:
-            if t.name == "DataloggerThread":
-                k = t.dataloggerName
+            if t.name == "DataLoggerThread":
+                k = t.detectorName
+                detector_names.append(k)
             else:
                 k = t.name
             status[k] = {"status": t.status}
 
         status["pending tasks"] = self.get_job_queue()
 
+        # summarise the status information into a single line
+        # summary is something like:
+        #  TEST_002M  link: connected, serial: COM1  TEST_050M  link: connected, serial: COM2
+        summary_list = []
+        for k in detector_names:
+            # itm_summary = ','.join([
+            #        f'{itmkey}: {str(itmvalue)}' for itmkey,itmvalue in zip(status[k]['status'].items())
+            #    ])
+            itm_summary = str(status[k]["status"])
+            summary_list.append(f"{k}   {itm_summary}")
+
+        summary_cal = f"Calibration Unit    {status['CalibrationUnitThread']['status']['message']}"
+        summary_list.append(summary_cal)
+
+        status["summary"] = "    ".join(summary_list)
         return status
 
     def get_job_queue(self):
@@ -400,6 +419,7 @@ class MainController(object):
         radon_detector=0,
         start_time=None,
     ):
+        print(flush_duration, inject_duration)
         self._cal_system_task.run_calibration(
             flush_duration, inject_duration, start_time=None
         )

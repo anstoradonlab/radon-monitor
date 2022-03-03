@@ -655,13 +655,16 @@ class DataStore(object):
         try:
             tstr = tuple(cur.execute(sql).fetchall()[0])[0]
             # tstr will be None if there are no rows in the database yet
-            try:
-                most_recent_time = datetime.datetime.strptime(tstr, "%Y-%m-%d %H:%M:%S")
-            except Exception as ex:
-                _logger.error(
-                    f"Error parsing most recent time in database.  sql: {sql}, time string: '{tstr}'"
-                )
-                log_backtrace_all_threads()
+            if tstr is not None:
+                try:
+                    most_recent_time = datetime.datetime.strptime(
+                        tstr, "%Y-%m-%d %H:%M:%S"
+                    )
+                except Exception as ex:
+                    _logger.error(
+                        f"Error parsing most recent time in database.  sql: {sql}, time string: '{tstr}'"
+                    )
+                    log_backtrace_all_threads()
         except sqlite3.OperationalError as ex:
             _logger.debug(f"SQL exception: {ex} while executing {sql}")
 
@@ -919,8 +922,10 @@ class DataStore(object):
                 with con:
                     cur = con.cursor()
                     # 10 days of data at 1 sample/10 second
-                    # (controls the number of rwos returned by fecthmany)
-                    cur.arraysize = 14400 * 0
+                    # (controls the number of rows returned by fetchmany)
+
+                    # cur.arraysize = 14400 * 0
+
                     with con_archive:
                         # the steps here are (timing for 10-sec table)
                         #  1. query (to find the rows to move, happens lazily and very quickly)
@@ -1115,6 +1120,16 @@ class DataStore(object):
 
                 try:
                     data = self.con.execute(sql).fetchall()
+                except sqlite.OperationalError as ex:
+                    if ex.args == ("no such column: Results.DetectorName",):
+                        # this may happen on a new database, where the results column has been created
+                        # but nothing yet written
+                        _logger.error(
+                            f"Skipping output to legacy files because the database does not seem to be ready (error: {ex})"
+                        )
+                        continue
+                    else:
+                        raise ex
                 except Exception as ex:
                     _logger.error(f"Error ({ex}) while executing sql: {sql}")
                     raise ex
