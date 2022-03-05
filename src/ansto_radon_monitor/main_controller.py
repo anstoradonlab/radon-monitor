@@ -33,8 +33,12 @@ from ansto_radon_monitor.configuration import Configuration
 from ansto_radon_monitor.datastore import DataStore
 from ansto_radon_monitor.html import get_html_page
 
-from .scheduler_threads import (CalibrationUnitThread, DataLoggerThread,
-                                DataMinderThread, MockDataLoggerThread)
+from .scheduler_threads import (
+    CalibrationUnitThread,
+    DataLoggerThread,
+    DataMinderThread,
+    MockDataLoggerThread,
+)
 
 
 def setup_logging(loglevel, logfile=None):
@@ -364,7 +368,7 @@ class MainController(object):
         """Return a html representation of the current measurement state"""
         fragments = []
         for t in self._threads:
-            if hasattr(t, 'html_current_status'):
+            if hasattr(t, "html_current_status"):
                 fragments.append(t.html_current_status())
         html = get_html_page(fragments)
         return html

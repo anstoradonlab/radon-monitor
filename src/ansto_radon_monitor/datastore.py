@@ -10,6 +10,7 @@ import threading
 import time
 import traceback
 import typing
+from typing import Union
 from collections import defaultdict
 from sqlite3.dbapi2 import OperationalError
 
@@ -49,6 +50,27 @@ def iter_months(tmin, tmax):
     while y < tmax.year or m <= tmax.month:
         yield y, m
         y, m = next_year_month(y, m)
+
+
+class LatestRowToken(object):
+    # TODO: add type hint for Self (dunno how this should be expressed)
+    def __init__(self, t: Union[None, datetime.datetime], latest_rowid: int = 0):
+        """
+        Store a token which can be used to indicate the most recent data
+        from a database.  It's better than just using a time because
+        we can store internal database properties (the rowid) which allow
+        for much faster indexing
+
+        TODO: test that this approach works properly during database rollover (I think it should, based on docs)
+              - note, there should be no chance of data loss if this doesn't work properly, but data may
+                not get displayed properly in guis
+        """
+        if type(t) == type(self):
+            self.t = t.t
+            self.latest_rowid = t.latest_rowid
+        else:
+            self.t = t
+            self.latest_rowid = latest_rowid
 
 
 # TODO: reorganise + clean up
@@ -376,9 +398,6 @@ class DataStore(object):
         self._connection_per_thread = {}
         self._data_lock = threading.RLock()
         self._readonly = readonly
-
-        # the last row_id returned by "get_rows" per table
-        self._last_rowid = {}
 
         # this forces an immediate connection to the database
         # so that any errors will occur now (rather than once
@@ -708,14 +727,22 @@ class DataStore(object):
         )
         return min_time
 
-    def get_rows(self, table_name, start_time, maxrows=1000, recent=True):
+    def get_rows(
+        self,
+        table_name,
+        start_time: Union[datetime.datetime, LatestRowToken],
+        maxrows=1000,
+        recent=True,
+    ):
         """
         Get data from table beginning with start_time
 
         TODO: doc fully
-        TODO: the 'start_time' should be replaced or augmented with a rowid
+        [done] TODO: the 'start_time' should be replaced or augmented with a rowid
         """
         t0 = datetime.datetime.utcnow()
+        t_token = LatestRowToken(start_time)
+        last_rowid = t_token.latest_rowid
 
         # protect against "closed database" happening at any point in this code block
         try:
@@ -731,10 +758,15 @@ class DataStore(object):
             rowid_max = self.con.execute(
                 f"select max(rowid) from {table_name}"
             ).fetchall()[0]["max(rowid)"]
-            last_rowid = self._last_rowid.get(table_name, 0)
-            self._last_rowid[table_name] = rowid_max
+            t_token.latest_rowid = rowid_max
 
-            # create a temporary view which only contains the data seen since the last
+            # create a temporary view which only contains the data seen since the last time this function was
+            # called (based on the value of the rowid passed to us inside the RecentRowToken)
+            # This is helpful because indexing the database based on rowid is extremely fast,
+            # where it's slow to index on the Datetime column.  We do have the option of adding an index
+            # on the Datetime column, but Datetimes are stored as strings and probably represent about half
+            # of the storage on disk.  Adding an index would, I think, roughly double the database size
+            # (based on my reading of the docs, but this isn't tested so might be a colossal waste of time)
             using_a_view = False
             if recent:
                 view_name = "recent_" + table_name
@@ -751,8 +783,8 @@ class DataStore(object):
             # WHERE columname >='2012-12-25 00:00:00'
             # AND columname <'2012-12-26 00:00:00'
             # Note: this uses a subset (e.g. see https://stackoverflow.com/questions/7786570/get-another-order-after-limit)
-            if start_time is not None:
-                t_str = start_time.strftime("%Y-%m-%d %H:%M:%S")
+            if t_token.t is not None:
+                t_str = t_token.t.strftime("%Y-%m-%d %H:%M:%S")
                 sql = f"SELECT * from (SELECT * FROM {view_name} WHERE Datetime > '{t_str}' ORDER BY Datetime DESC LIMIT {maxrows}) as T1 order by Datetime ASC"
             else:
                 sql = f"SELECT * from (SELECT * FROM {view_name} ORDER BY Datetime DESC LIMIT {maxrows}) as T1 ORDER BY Datetime ASC"
@@ -788,7 +820,7 @@ class DataStore(object):
 
         if len(data) == 0:
             # no data obtained, so t is unchanged
-            t = start_time
+            t_token = t_token
             # t = self.get_update_time(table_name, detector_name=None)
         else:
             t = max((itm["Datetime"] for itm in data))
@@ -803,12 +835,13 @@ class DataStore(object):
                     return itm
 
                 data = [conv_date(itm) for itm in data]
+            t_token = LatestRowToken(t, rowid_max)
 
         _logger.debug(
-            f"Loading data (rows: {len(data)}, table: {view_name}, start time: {start_time}, max_t: {t}) took: {datetime.datetime.utcnow()-t0}"
+            f"Loading data (rows: {len(data)}, table: {view_name}, start time: {start_time}, max_t_token: {t_token}) took: {datetime.datetime.utcnow()-t0}"
         )
 
-        return t, data
+        return t_token, data
 
     def get_archive_filename(self, data_dir, y, m):
         fname = os.path.abspath(

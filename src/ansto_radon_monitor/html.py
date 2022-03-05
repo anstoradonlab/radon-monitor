@@ -1,9 +1,7 @@
-
-
 def status_as_html(title, info):
     """
     Produce a html table from a dictionary of status information
-    
+
     title is a string,
     info is something like:
 
@@ -16,27 +14,35 @@ def status_as_html(title, info):
     """
     html = ""
     html += f'<H1 class="instrument-name">{title}</H1>'
-    html +=  '    <table class="dataframe" style="cellspacing="10" cellpadding="2">\n<tbody>'
-    html +=  ("""<tr class="names">""" 
-                  + "\n".join([
-                  f"<td>{itm}</td>" for itm in info['description']])
-                  + "\n</tr>\n")
-    html +=  ("""<tr class="values">""" 
-                  + "\n".join([
-                  f"<td>{itm}</td>" for itm in info['values']])
-                  + "\n</tr>\n")
-    html +=  ("""<tr class="units">""" 
-                  + "\n".join([
-                  f"<td>{itm}</td>" for itm in info['units']])
-                  + "\n</tr>\n")
-    html +=  '</tbody>\n</table>\n'
+    html += (
+        '    <table class="dataframe" style="cellspacing="10" cellpadding="2">\n<tbody>'
+    )
+    html += (
+        """<tr class="names">"""
+        + "\n".join([f"<td>{itm}</td>" for itm in info["description"]])
+        + "\n</tr>\n"
+    )
+    html += (
+        """<tr class="values">"""
+        + "\n".join([f"<td>{itm}</td>" for itm in info["values"]])
+        + "\n</tr>\n"
+    )
+    html += (
+        """<tr class="units">"""
+        + "\n".join([f"<td>{itm}</td>" for itm in info["units"]])
+        + "\n</tr>\n"
+    )
+    html += "</tbody>\n</table>\n"
     return html
 
 
+# TODO: this html stuff is all a bit of a hopeless mess.  The css
+# worked well in firefox, but doesn't seem to do much in the Qt
+# text widget.  Could be simplifed enormously while also made nicer looking.
 def get_html_page(list_of_fragments):
     """Adds some suitable header/footer to a list of html fragments
-        (as produced by status_as_html)"""
-    
+    (as produced by status_as_html)"""
+
     template_head = """
 <!DOCTYPE html>
 <html>
@@ -79,6 +85,9 @@ def get_html_page(list_of_fragments):
             font-size: 15px;
 
         }
+        .dataframe table {
+            width: 100pc;
+        }
 
         .values td {
             width: 100px;
@@ -97,15 +106,15 @@ def get_html_page(list_of_fragments):
         }
 
         .instrument-name h1{
-            font-family:Verdana, Geneva, Tahoma, sans-serif;
-            font-size: 20px;
+//            font-family:Verdana, Geneva, Tahoma, sans-serif;
+//            font-size: 15px;
         }
     </style>
 
     <style base>
         h1 {
-            font-family:Verdana, Geneva, Tahoma, sans-serif;
-            font-size: 20px;
+//            font-family:Verdana, Geneva, Tahoma, sans-serif;
+//            font-size: 15px;
         }
 
     </style>
@@ -117,5 +126,5 @@ def get_html_page(list_of_fragments):
     template_footer = """
 </body>
 </html>"""
-    html = template_head + '\n'.join(list_of_fragments) + template_footer
+    html = template_head + "\n".join(list_of_fragments) + template_footer
     return html
