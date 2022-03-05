@@ -18,6 +18,7 @@ from pycampbellcr1000.utils import ListDict
 
 from ansto_radon_monitor.configuration import Configuration
 from ansto_radon_monitor.datastore import DataStore
+from ansto_radon_monitor.html import status_as_html
 
 _logger = logging.getLogger()
 
@@ -665,6 +666,8 @@ class DataLoggerThread(DataThread):
         self.tables = []
         # set this to a long time ago
         self._last_time_check = datetime.datetime.min
+        # buffer for last 30 minutes of 10-second (RTV) measurements
+        self._rtv_buffer = collections.deque(maxlen=30*6)
 
         self._scheduler.enter(
             delay=0,
@@ -741,6 +744,8 @@ class DataLoggerThread(DataThread):
                             itm = fix_record(itm)
                             itm["DetectorName"] = self._config.name
                             self._datastore.add_record(destination_table_name, itm)
+                            if table_name == "RTV":
+                                self._rtv_buffer.append(itm)
         self.status["link"] = "connected"
 
         # include the clock check as part of the measurement function
@@ -750,6 +755,40 @@ class DataLoggerThread(DataThread):
             self.synchronise_clock()
             self.log_status()
             self._last_time_check = datetime.datetime.now()
+
+    def html_current_status(self):
+        """Return the current measurement status as html"""
+        info = {'var': ['LLD', "ULD", "HV", "InFlow", "ExFlow", "AirT", "RelHum", "Pres"],
+                'description': ["Total Counts", "Noise Counts", "PMT Voltage", "Internal Flow Velocity", "External Flow Rate", "Air Temperature", "Relative Humidity", "Pressure" ],
+                'units': ["Last 30 minutes", "Last 30 minutes", "V", "m/s", "L/min", "deg C", "%", "hPa"],
+                }
+        nvar = len(info['var'])
+
+        if len(self._rtv_buffer) == 0:
+            values = ["---"] * nvar
+        else:
+            recent_data = self._rtv_buffer[-1]
+            data_age = datetime.datetime.utcnow() - recent_data['Datetime']
+            # don't show values if logging seems to be interrupted
+            if data_age > datetime.timedelta(seconds=600):
+                values = ["---"] * nvar
+            else:
+                # don't yet have 30 minutes of data
+                if len(self._rtv_buffer) < self._rtv_buffer.maxlen:
+                    values = ["---", "---"]
+                else:
+                    lld_total = sum([itm['LLD'] for itm in self._rtv_buffer])
+                    uld_total = sum([itm['ULD'] for itm in self._rtv_buffer])
+                # other values are just taken from the most recent info
+                values = values + [recent_data.get(k, '---') for k in info['var'][2:]]
+                # pressure, convert from Pa to hPa
+                values[-1] = round(values[-1]/100.0, 1)
+                values = [str(itm) for itm in values]
+        info['values'] = values
+        title = self.detectorName + " Radon Detector"
+        html = status_as_html(title, info)
+        return html
+
 
     def log_status(self):
         progstat = self._datalogger.getprogstat()
