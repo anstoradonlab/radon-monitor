@@ -342,8 +342,8 @@ class CalibrationUnitThread(DataThread):
         t = datetime.datetime.utcnow()
         t = t.replace(microsecond=0)
         data = {"Datetime": t}
-        data.update(self._labjack.digital_output_state)
         data.update(self._labjack.analogue_states)
+        data.update(self._labjack.digital_output_state)
         # send measurement to datastore
         self._datastore.add_record(self._data_table_name, data)
 
@@ -969,9 +969,13 @@ class MockCR1000(object):
         recs_to_return = []
 
         def rn_func(t):
-            return 200.0 + 100.0 * np.sin(
+            rn = 200.0 + 100.0 * np.sin(
                 (t - tref).total_seconds() * 2 * np.pi / (3600 * 24)
             )
+            source_injection = True
+            if source_injection:
+                rn *= 50
+            return rn
 
         rng = np.random.default_rng()
 
@@ -984,7 +988,7 @@ class MockCR1000(object):
                     "RecNbr": rec_num,
                     "ExFlow": 80.01,
                     "InFlow": 11.1,
-                    "LLD": rng.poisson(rn_func(t) / 60.0),
+                    "LLD": rng.poisson(rn_func(t) / 10.0 / 30.0),
                     "ULD": 0,
                     "Pres": 101325.01,
                     "TankP": 100.01,
@@ -1113,7 +1117,7 @@ class DataMinderThread(DataThread):
         delay_seconds = (next_backup - t).total_seconds()
 
         _logger.info(
-            f"Next backup scheduled for {next_backup} in {delay_seconds} seconds"
+            f"Next backup scheduled for {next_backup} in {delay_seconds/3600:.03} hours"
         )
 
         self._scheduler.enter(

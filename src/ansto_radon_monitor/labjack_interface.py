@@ -142,7 +142,7 @@ class CalBoxLabjack:
             self.digital_output_channel[k] = ii
 
         # flow measured on analogue channel 0, Pump voltage on analogue channel 1
-        self.analogue_input_channel = {"flow": 0, "pump": 1}
+        self.analogue_input_channel = {"Flow": 0, "Pump": 1}
 
     def flush(self):
         """Start source-flush pump"""
@@ -260,8 +260,8 @@ class CalBoxLabjack:
         status["message"] = s
         status["digital out"] = {}
         status["analogue in"] = {}
-        status["digital out"].update(self.digital_output_state)
         status["analogue in"].update(self.analogue_states)
+        status["digital out"].update(self.digital_output_state)
         status["serial"] = self.serial_number
         return status
 
