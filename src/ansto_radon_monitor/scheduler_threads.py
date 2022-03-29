@@ -150,7 +150,9 @@ class DataThread(threading.Thread):
         return age
 
     def measurement_func(self):
-        _logger.debug(f"Taking measurement at {datetime.datetime.now()}")
+        _logger.debug(
+            f"Taking measurement at {datetime.datetime.now(datetime.timezone.utc)}"
+        )
         _logger.debug(f"Scheduler queue: {self._scheduler.queue}")
 
     def shutdown_func(self):
@@ -339,7 +341,7 @@ class CalibrationUnitThread(DataThread):
         self._labjack.reset_calibration()
 
     def measurement_func(self):
-        t = datetime.datetime.utcnow()
+        t = datetime.datetime.now(datetime.timezone.utc)
         t = t.replace(microsecond=0)
         data = {"Datetime": t}
         data.update(self._labjack.analogue_states)
@@ -387,7 +389,10 @@ class CalibrationUnitThread(DataThread):
             p = self._calibration_tasks_priority
             if start_time is not None:
                 initial_delay_seconds = max(
-                    0, (start_time - datetime.datetime.utcnow()).total_seconds()
+                    0,
+                    (
+                        start_time - datetime.datetime.now(datetime.timezone.utc)
+                    ).total_seconds(),
                 )
             else:
                 initial_delay_seconds = 0
@@ -456,7 +461,10 @@ class CalibrationUnitThread(DataThread):
             p = self._background_tasks_priority
             if start_time is not None:
                 initial_delay_seconds = max(
-                    0, (start_time - datetime.datetime.utcnow()).total_seconds()
+                    0,
+                    (
+                        start_time - datetime.datetime.now(datetime.timezone.utc)
+                    ).total_seconds(),
                 )
             else:
                 initial_delay_seconds = 0
@@ -511,7 +519,7 @@ class CalibrationUnitThread(DataThread):
     ):
         with self._lock:
             # ensure first_start_time is in the future
-            now = datetime.datetime.utcnow()
+            now = datetime.datetime.now(datetime.timezone.utc)
             ii = 0
             maxiter = 365 * 2050
             while first_start_time < now:
@@ -535,7 +543,10 @@ class CalibrationUnitThread(DataThread):
                 seconds=int(flush_duration + inject_duration)
             )
             scheduler_delay_seconds = max(
-                0, (sched_time - datetime.datetime.utcnow()).total_seconds()
+                0,
+                (
+                    sched_time - datetime.datetime.now(datetime.timezone.utc)
+                ).total_seconds(),
             )
             self._scheduler.enter(
                 delay=scheduler_delay_seconds,
@@ -553,7 +564,7 @@ class CalibrationUnitThread(DataThread):
     ):
         with self._lock:
             # ensure first_start_time is in the future
-            now = datetime.datetime.utcnow()
+            now = datetime.datetime.now(datetime.timezone.utc)
             ii = 0
             maxiter = 365 * 2050
             while first_start_time < now:
@@ -574,7 +585,10 @@ class CalibrationUnitThread(DataThread):
             # After the next background has completed, schedule the next one
             sched_time = first_start_time + datetime.timedelta(seconds=int(duration))
             scheduler_delay_seconds = max(
-                0, (sched_time - datetime.datetime.utcnow()).total_seconds()
+                0,
+                (
+                    sched_time - datetime.datetime.now(datetime.timezone.utc)
+                ).total_seconds(),
             )
             self._scheduler.enter(
                 delay=scheduler_delay_seconds,
@@ -650,6 +664,9 @@ def fix_record(record: Dict):
         if k.startswith("b'") and k.endswith("'"):
             new_k = k[2:-1]
         r[new_k] = v
+        # Define the timestamp as utc
+        if k == "Datetime":
+            r[k] = r[k].replace(tzinfo=datetime.timezone.utc)
     return r
 
 
@@ -710,7 +727,9 @@ class DataLoggerThread(DataThread):
                 )
 
             # set this to a long time ago
-            self._last_time_check = datetime.datetime.min
+            self._last_time_check = datetime.datetime.min.replace(
+                tzinfo=datetime.timezone.utc
+            )
 
     def measurement_func(self):
         # TODO: handle lost connection
@@ -749,12 +768,12 @@ class DataLoggerThread(DataThread):
         self.status["link"] = "connected"
 
         # include the clock check as part of the measurement function
-        if datetime.datetime.now() - self._last_time_check > datetime.timedelta(
-            days=15
-        ):
+        if datetime.datetime.now(
+            datetime.timezone.utc
+        ) - self._last_time_check > datetime.timedelta(days=15):
             self.synchronise_clock()
             self.log_status()
-            self._last_time_check = datetime.datetime.now()
+            self._last_time_check = datetime.datetime.now(datetime.timezone.utc)
 
     def html_current_status(self):
         """Return the current measurement status as html"""
@@ -787,18 +806,30 @@ class DataLoggerThread(DataThread):
             values = ["---"] * nvar
         else:
             recent_data = self._rtv_buffer[-1]
-            data_age = datetime.datetime.utcnow() - recent_data["Datetime"]
+            data_age = (
+                datetime.datetime.now(datetime.timezone.utc) - recent_data["Datetime"]
+            )
             # don't show values if logging seems to be interrupted
-            if data_age > datetime.timedelta(seconds=600):
+            if data_age > datetime.timedelta(seconds=60):
                 values = ["---"] * nvar
             else:
                 # don't yet have 30 minutes of data
                 if len(self._rtv_buffer) < self._rtv_buffer.maxlen:
                     values = ["wait", "wait"]
                 else:
-                    lld_total = sum([itm["LLD"] for itm in self._rtv_buffer])
-                    uld_total = sum([itm["ULD"] for itm in self._rtv_buffer])
-                    values = [lld_total, uld_total]
+                    time_span = (
+                        self._rtv_buffer[-1]["Datetime"]
+                        - self._rtv_buffer[0]["Datetime"]
+                    )
+                    if not time_span == datetime.timedelta(minutes=29, seconds=50):
+                        # the buffer is the correct length, but it covers the wrong period
+                        # (logging might have been interrupted)
+
+                        values = ["wait2", "wait2"]
+                    else:
+                        lld_total = sum([itm["LLD"] for itm in self._rtv_buffer])
+                        uld_total = sum([itm["ULD"] for itm in self._rtv_buffer])
+                        values = [lld_total, uld_total]
                 # other values are just taken from the most recent info
                 values = values + [recent_data.get(k, "---") for k in info["var"][2:]]
                 # pressure, convert from Pa to hPa
@@ -830,10 +861,10 @@ class DataLoggerThread(DataThread):
         # measure the length of time required to query the datalogger clock
         # -- first query it, in case of slow response due to power saving
         # -- mode or some such
-        t_datalogger = self._datalogger.gettime()
+        t_datalogger = self._datalogger.gettime().replace(tzinfo=datetime.timezone.utc)
         tick = time.time()
-        t_datalogger = self._datalogger.gettime()
-        t_computer = datetime.datetime.utcnow()
+        t_datalogger = self._datalogger.gettime().replace(tzinfo=datetime.timezone.utc)
+        t_computer = datetime.datetime.now(datetime.timezone.utc)
         tock = time.time()
         time_required_for_query = tock - tick
         halfquery = datetime.timedelta(seconds=time_required_for_query / 2.0)
@@ -875,7 +906,7 @@ class DataLoggerThread(DataThread):
                 f"Datalogger and computer clocks are out of synchronisation by less than {minimum_time_difference_seconds} seconds, not adjusting time"
             )
         else:
-            new_time = datetime.datetime.utcnow() + halfquery
+            new_time = datetime.datetime.now(datetime.timezone.utc) + halfquery
             self._datalogger.settime(new_time)
             clock_offset, halfquery = self.get_clock_offset()
             self._datastore.add_log_message(
@@ -905,14 +936,16 @@ class MockCR1000(object):
 
     def gettime(self):
         time.sleep(0.01)
+        # this returns a timezone naive object, to match
+        # the CR1000 library
         t = datetime.datetime.utcnow() + self.__timeoffset
-        t = datetime.datetime(*t.timetuple()[:6])
+        t = t.replace(microsecond=0)
         time.sleep(0.01)
         return t
 
     def settime(self, t):
         time.sleep(0.01)
-        self.__timeoffset = datetime.datetime.utcnow() - t
+        self.__timeoffset = datetime.datetime.now(datetime.timezone.utc) - t
         time.sleep(0.01)
 
     def getprogstat(self):
@@ -939,11 +972,11 @@ class MockCR1000(object):
         batchsize = 1440 * 6
 
         # an arbitrary reference time
-        tref = datetime.datetime(2000, 1, 1)
+        tref = datetime.datetime(2000, 1, 1, tzinfo=datetime.timezone.utc)
         # number of days back in time to generate data for
         # (need more than 60 to test rollover functions)
         numdays = 100
-        t_latest = datetime.datetime.utcnow()
+        t_latest = datetime.datetime.now(datetime.timezone.utc)
 
         if table_name == "RTV":
             # rtv contains data at each 10 seconds
@@ -954,7 +987,7 @@ class MockCR1000(object):
             numrecs = 8640 * numdays
         elif table_name == "Results":
             t_latest = t_latest.replace(
-                microsecond=0, second=0, minute=t_latest.second // 30 * 30
+                microsecond=0, second=0, minute=t_latest.minute // 30 * 30
             )
             dt = datetime.timedelta(minutes=30)
             numrecs = numdays * 24 * 2
@@ -988,7 +1021,7 @@ class MockCR1000(object):
                     "RecNbr": rec_num,
                     "ExFlow": 80.01,
                     "InFlow": 11.1,
-                    "LLD": rng.poisson(rn_func(t) / 10.0 / 30.0),
+                    "LLD": rng.poisson(rn_func(t) / 6.0 / 30.0),
                     "ULD": 0,
                     "Pres": 101325.01,
                     "TankP": 100.01,
@@ -1096,22 +1129,26 @@ class DataMinderThread(DataThread):
             self._datastore.sync_legacy_files(data_dir)
 
     def run_database_tasks(self, backup_time_of_day: datetime.time):
+        # there may be a long delay (e.g. network drives), so allow
+        # this routine to hang without bringing down the entire program
         with self._heartbeat_time_lock:
             self._tolerate_hang = True
 
         # sleep here allows other database threads (which may be scheduled on the minute)
         # to have a chance to run first
         time.sleep(1)
-        t0 = datetime.datetime.utcnow()
+        t0 = datetime.datetime.now(datetime.timezone.utc)
         # run tasks
         self.sync_legacy_files(data_dir=self._config.data_dir)
         self.archive_data(data_dir=self._config.data_dir)
         self.backup_active_database()
-        t = datetime.datetime.utcnow()
+        t = datetime.datetime.now(datetime.timezone.utc)
         _logger.info(f"Database backup, archive, and legacy file export took {t-t0}")
 
         # re-schedule next backup
-        next_backup = datetime.datetime.combine(t.date(), backup_time_of_day)
+        next_backup = datetime.datetime.combine(t.date(), backup_time_of_day).replace(
+            tzinfo=datetime.timezone.utc
+        )
         if (next_backup - t).total_seconds() < 60:
             next_backup += datetime.timedelta(days=1)
         delay_seconds = (next_backup - t).total_seconds()

@@ -10,15 +10,42 @@ import threading
 import time
 import traceback
 import typing
-from typing import Union
 from collections import defaultdict
 from sqlite3.dbapi2 import OperationalError
+from typing import Union
 
 _logger = logging.getLogger(__name__)
 
 
 # database time format
 DBTFMT = "%Y-%m-%d %H:%M:%S"
+
+
+def format_date(t):
+    """
+    Format the timestamp so that the timezone gets dropped
+    (All dates are assumed to be set to UTC)
+    """
+    # Enforce the use of timezone-aware datetimes
+    if not t.tzinfo == datetime.timezone.utc:
+        print("t.tzinfo is not UTC")
+    return t.strftime(DBTFMT)
+
+
+def parse_date(tstr):
+    return datetime.datetime.strptime(tstr, DBTFMT).replace(
+        tzinfo=datetime.timezone.utc
+    )
+
+
+# by default, a timezone-aware timestamp passed to the database will be written in
+# a format which can't easily be round-tripped
+# (discussion: https://stackoverflow.com/questions/30999230/how-to-parse-timezone-with-colon)
+sqlite3.register_adapter(datetime.datetime, format_date)
+
+# at the moment, allow the database to return times as strings
+# (often it's fine to work with them like this)
+# sqlite3.register_converter('timestamp', parse_date)
 
 # utility functions
 def next_year_month(y, m):
@@ -93,7 +120,7 @@ class TableStorage:
         self.name = table_name
         self.latest_time = None
         self._data = self.load_from_disk()
-        self._last_insertion_time = datetime.datetime.utcnow()
+        self._last_insertion_time = datetime.datetime.now(datetime.timezone.utc)
 
     def _file_for_record(self, t: datetime.datetime) -> pathlib.Path:
         """file which a particular record should be written to"""
@@ -160,7 +187,9 @@ class TableStorage:
                     )
                 # first column is always timestamp
                 fmt = "%Y-%m-%d %H:%M:%S"
-                row[0] = datetime.datetime.strptime(row[0], fmt)
+                row[0] = datetime.datetime.strptime(row[0], fmt).replace(
+                    tzinfo=datetime.timezone.utc
+                )
                 # update the 'latest_time' field
                 if self.latest_time is None or row[0] > self.latest_time:
                     self.latest_time = row[0]
@@ -203,10 +232,10 @@ class TableStorage:
                     writer = csv.writer(csvfile)
                     writer.writerow(row)
 
-            self._last_insertion_time = datetime.datetime.utcnow()
+            self._last_insertion_time = datetime.datetime.now(datetime.timezone.utc)
 
     def load_from_disk(self, start_date=None):
-        now = datetime.datetime.utcnow()
+        now = datetime.datetime.now(datetime.timezone.utc)
         if start_date is None:
             start_date = now - datetime.timedelta(days=10)
         t = start_date
@@ -414,7 +443,7 @@ class DataStore(object):
         # default timeout is 5 seconds - make this much longer
         # (in testing, no DB operations take more than about 4 seconds)
         timeout_seconds = 60 * 5
-        # timeout_seconds = 1 # for testing (finds failure points)
+        timeout_seconds = 1  # for testing (finds failure points)
         tid = threading.get_ident()
         if not tid in self._connection_per_thread:
             _logger.info(f"thread {tid} connecting to database {self.data_file}")
@@ -502,9 +531,9 @@ class DataStore(object):
 
     def add_log_message(self, event_type, event_text):
         table_name = "LogMessages"
-        t = datetime.datetime.utcnow()
+        t = datetime.datetime.now(datetime.timezone.utc)
         # floor to nearest second
-        t = datetime.datetime(*t.timetuple()[:6])
+        t = datetime.datetime(*t.timetuple()[:6], tzinfo=t.tzinfo)
         data = {"Datetime": t, "EventType": event_type, "EventData": event_text}
         self.add_record(table_name, data)
 
@@ -659,7 +688,7 @@ class DataStore(object):
             TODO: (maybe) If there is not any time information in the table, fall back to returning
             the time of the last update in utc.
         """
-        t0 = datetime.datetime.utcnow()
+        t0 = datetime.datetime.now(datetime.timezone.utc)
         cur = self.con.cursor()
         # note: can't combine 'max' with automatic conversion from timestamp
         # optimisation - run the query only on recent data
@@ -678,7 +707,7 @@ class DataStore(object):
                 try:
                     most_recent_time = datetime.datetime.strptime(
                         tstr, "%Y-%m-%d %H:%M:%S"
-                    )
+                    ).replace(tzinfo=datetime.timezone.utc)
                 except Exception as ex:
                     _logger.error(
                         f"Error parsing most recent time in database.  sql: {sql}, time string: '{tstr}'"
@@ -688,7 +717,7 @@ class DataStore(object):
             _logger.debug(f"SQL exception: {ex} while executing {sql}")
 
         _logger.debug(
-            f"Executing SQL: {sql}, returned: {most_recent_time}, took: {datetime.datetime.utcnow()-t0}"
+            f"Executing SQL: {sql}, returned: {most_recent_time}, took: {datetime.datetime.now(datetime.timezone.utc)-t0}"
         )
         return most_recent_time
 
@@ -707,12 +736,14 @@ class DataStore(object):
             # currently min([]) --> raises ValueError
             return min(min_times)
 
-        t0 = datetime.datetime.utcnow()
+        t0 = datetime.datetime.now(datetime.timezone.utc)
         sql = f"select min(Datetime) from {table_name}"
         try:
             tstr = tuple(self.con.execute(sql).fetchall()[0])[0]
             try:
-                min_time = datetime.datetime.strptime(tstr, "%Y-%m-%d %H:%M:%S")
+                min_time = datetime.datetime.strptime(
+                    tstr, "%Y-%m-%d %H:%M:%S"
+                ).replace(tzinfo=datetime.timezone.utc)
             except Exception as ex:
                 _logger.error(
                     f"Error parsing most recent time in database.  sql: {sql}, time string: '{tstr}'"
@@ -723,7 +754,7 @@ class DataStore(object):
             raise ex
 
         _logger.debug(
-            f"Executing SQL: {sql}, returned: {min_time}, took: {datetime.datetime.utcnow()-t0}"
+            f"Executing SQL: {sql}, returned: {min_time}, took: {datetime.datetime.now(datetime.timezone.utc)-t0}"
         )
         return min_time
 
@@ -740,7 +771,7 @@ class DataStore(object):
         TODO: doc fully
         [done] TODO: the 'start_time' should be replaced or augmented with a rowid
         """
-        t0 = datetime.datetime.utcnow()
+        t0 = datetime.datetime.now(datetime.timezone.utc)
         t_token = LatestRowToken(start_time)
         last_rowid = t_token.latest_rowid
 
@@ -826,19 +857,21 @@ class DataStore(object):
             t = max((itm["Datetime"] for itm in data))
             # if t is a string, convert to python datetime at this point
             if not hasattr(t, "strptime"):
-                t = datetime.datetime.strptime(t, "%Y-%m-%d %H:%M:%S")
+                t = datetime.datetime.strptime(t, "%Y-%m-%d %H:%M:%S").replace(
+                    tzinfo=datetime.timezone.utc
+                )
 
                 def conv_date(itm):
                     itm["Datetime"] = datetime.datetime.strptime(
                         itm["Datetime"], "%Y-%m-%d %H:%M:%S"
-                    )
+                    ).replace(tzinfo=datetime.timezone.utc)
                     return itm
 
                 data = [conv_date(itm) for itm in data]
             t_token = LatestRowToken(t, rowid_max)
 
         _logger.debug(
-            f"Loading data (rows: {len(data)}, table: {view_name}, start time: {start_time}, max_t_token: {t_token}) took: {datetime.datetime.utcnow()-t0}"
+            f"Loading data (rows: {len(data)}, table: {view_name}, start time: {start_time}, max_t_token: {t_token}) took: {datetime.datetime.now(datetime.timezone.utc)-t0}"
         )
 
         return t_token, data
@@ -930,7 +963,7 @@ class DataStore(object):
         )
 
         maximum_age = datetime.timedelta(days=35)
-        threshold_time = datetime.datetime.now() - maximum_age
+        threshold_time = datetime.datetime.now(datetime.timezone.utc) - maximum_age
         # are there any records older than "threshold_time"?
         database_mintime = self.get_minimum_time(None)
         if not database_mintime < threshold_time:
@@ -951,7 +984,7 @@ class DataStore(object):
                 t1_query = datetime.datetime(y1, m1, 1, 0, 0, 0)
 
                 fname_archive, con_archive = self.get_archive_db(data_dir, y, m, con)
-                t0 = datetime.datetime.utcnow()
+                t0 = datetime.datetime.now(datetime.timezone.utc)
                 with con:
                     cur = con.cursor()
                     # 10 days of data at 1 sample/10 second
@@ -1012,7 +1045,7 @@ class DataStore(object):
                         # if nrows < 1000: # this means we're done
                         #     break
                 _logger.info(
-                    f"Archiving data for {y}-{m:02} from table {table_name} ({nrows} rows) took {datetime.datetime.utcnow() - t0}"
+                    f"Archiving data for {y}-{m:02} from table {table_name} ({nrows} rows) took {datetime.datetime.now(datetime.timezone.utc) - t0}"
                 )
                 # sleep to give other tasks a chance to access the database
                 time.sleep(0.25)
@@ -1117,7 +1150,9 @@ class DataStore(object):
                 for k, itm in zip(row.keys(), row):
                     assert itm == row[k]
                     if k == "Datetime":
-                        itm = datetime.datetime.strptime(itm, DBTFMT)
+                        itm = datetime.datetime.strptime(itm, DBTFMT).replace(
+                            tzinfo=datetime.timezone.utc
+                        )
                         doy = itm.timetuple().tm_yday
                         itm_str = f"{itm.year}, {doy},{itm.month},{itm.day}, {itm.strftime('%H:%M')}"
                         output.append(itm_str)
@@ -1145,7 +1180,7 @@ class DataStore(object):
             # what if config has changed?
             for detector_config in self._config.detectors:
                 detector_name = detector_config.name
-                exec_t0 = datetime.datetime.utcnow()
+                exec_t0 = datetime.datetime.now(datetime.timezone.utc)
                 sql = (
                     f"SELECT {','.join(colnames)} from Results LEFT OUTER JOIN detector_names ON Results.DetectorName=detector_names.id "
                     f'WHERE Datetime >= "{t0_query.strftime(DBTFMT)}" and Datetime < "{t1_query.strftime(DBTFMT)}" and name = "{detector_name}"'
@@ -1167,7 +1202,7 @@ class DataStore(object):
                     _logger.error(f"Error ({ex}) while executing sql: {sql}")
                     raise ex
                 _logger.debug(
-                    f"Executing sql: {sql} took {datetime.datetime.utcnow() - exec_t0}"
+                    f"Executing sql: {sql} took {datetime.datetime.now(datetime.timezone.utc) - exec_t0}"
                 )
                 numrows = len(data)
                 if numrows == 0:

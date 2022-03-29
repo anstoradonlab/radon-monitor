@@ -12,7 +12,7 @@ __author__ = "Alan Griffiths"
 __copyright__ = "Alan Griffiths"
 __license__ = "mit"
 
-t0 = datetime.datetime.utcnow().replace(microsecond=0, second=0, minute=0, hour=0)
+t0 = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0, second=0, minute=0, hour=0)
 row = {"Datetime": t0, "RecNum": 103, "LLD": 123.0}
 
 
