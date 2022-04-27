@@ -829,6 +829,11 @@ class DataStore(object):
                     return None, []
                 else:
                     raise ex
+        except sqlite3.OperationalError as ex:
+            # sqlite3.OperationalError: no such table: RTV
+            if ex.args == (f"no such table: {table_name}",):
+                _logger.warning(f"Tried to read from {table_name} but table does not exist")
+                return None, []
         except sqlite3.ProgrammingError as ex:
             # sqlite3.ProgrammingError: Cannot operate on a closed database.
             if ex.args == ("Cannot operate on a closed database.",):

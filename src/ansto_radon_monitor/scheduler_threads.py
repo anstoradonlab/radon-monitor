@@ -710,6 +710,7 @@ class DataLoggerThread(DataThread):
             # Filter the tables - only include the ones which are useful
             tables_to_use = ["Results", "RTV"]
             self.tables = [itm for itm in self.tables if itm in tables_to_use]
+            
             self.status["link"] = "connected"
             self.status["serial"] = int(self._datalogger.getprogstat()["SerialNbr"])
             if not detector_config.datalogger_serial == -1:
@@ -744,7 +745,11 @@ class DataLoggerThread(DataThread):
                 )
                 if update_time is not None:
                     update_time += datetime.timedelta(seconds=1)
+                # The get_data_generator function doesn't like timezones
+                if update_time is not None:
+                    update_time = update_time.replace(tzinfo=None)
 
+                total_num_records = 0
                 for data in self._datalogger.get_data_generator(
                     table_name, start_date=update_time
                 ):
@@ -753,11 +758,15 @@ class DataLoggerThread(DataThread):
                     if self.state_changed.is_set():
                         return
                     # it is Ok for this to take a long time to run - datalogger is slow
+                    # Note: I considered breaking out of the loop early after e.g. 5 seconds so that the other
+                    # tables get updated too, but that causes problems in the data archive code
                     self.update_heartbeat_time()
                     if len(data) > 0:
-                        _logger.debug(
-                            f"Received data ({len(data)} records) from table {destination_table_name} with start_date = {update_time}."
-                        )
+                        total_num_records += len(data)
+                        msg = f"Received data ({total_num_records} records) from table {destination_table_name} with start_date = {update_time}."
+                        _logger.debug(msg)
+                        self.status["link"] = msg
+
 
                         for itm in data:
                             itm = fix_record(itm)
@@ -847,8 +856,8 @@ class DataLoggerThread(DataThread):
             f"Detector: {self.detectorName}, {pprint.pformat(progstat)}",
         )
         # TODO: work out which file is running from progstat
-        fname = "Blah.cr10"
-        data_file = self._datalogger.getfile(fname)
+        fname = str(progstat['ProgName'], 'utf-8')
+        data_file = str(self._datalogger.getfile(fname), 'utf-8')
         self._datastore.add_log_message(
             "LoggerFirmware", f"Detector: {self.detectorName}, \n{data_file}"
         )
@@ -876,7 +885,7 @@ class DataLoggerThread(DataThread):
         return clock_offset, halfquery
 
     def synchronise_clock(
-        self, maximum_time_difference_seconds=10, check_ntp_sync=True
+        self, maximum_time_difference_seconds=60, check_ntp_sync=True
     ):
         """Attempt to synchronise the clock on the datalogger with computer."""
         # NOTE: the api for adjusting the datalogger clock isn't accurate beyond 1 second
