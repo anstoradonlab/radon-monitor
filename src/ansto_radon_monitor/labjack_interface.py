@@ -18,7 +18,7 @@ class LabjackWrapper:
     the functions needed for our calibration system.
 
     There are multiple APIs to access the LabJack, so the use of this wrapper means
-    that we'll be able to sitch later if needed.
+    that we'll be able to switch later if needed.
 
     Only DIO ports 0-5 are used in our setup.
 
@@ -54,6 +54,27 @@ class LabjackWrapper:
         # if this function is needed, it will need to use rawDIO on linux, digitialIO on
         # windows
         # refer to https://labjack.com/forums/u12/liblabjackusbso-undefined-symbol-digitalio
+
+        # TODO: this should be implemented because sometimes (Weybourne) we've noticed
+        # the DIO state changing without being told to.
+
+        # TODO: Here's some notes for the rawDIO on linux:
+        # import u12
+        # d = u12.U12()
+        # state = d.rawDIO()
+        # # remove the latch states (so we can send 'state' back to the function as **state)
+        # state.pop('D15toD8OutputLatchStates')
+        # state.pop('D7toD0OutputLatchStates')
+        # # remove the IO data
+        # state.pop('IO3toIO0States')
+        # # set one of the channels
+        # k = 'D0'
+        # direction = 0 # 0 is output
+        # signal = 1 # 0 is low voltage, 1 is high voltage
+        # setattr(state['D7toD0Directions'], k, direction)
+        # setattr(state['D7toD0States'], k, signal)
+        # d.rawDIO(**state, UpdateDigital=True)
+
 
     @property
     def analogue_states(self):
