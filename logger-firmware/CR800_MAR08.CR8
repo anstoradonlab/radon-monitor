@@ -4,6 +4,7 @@ Detector: BareDatalogger,
 'Last modified: Scott Chambers, Feb-2007
 'Added RTV table: S.Werczynski, Feb-2007
 'Added RH/Temp and barometer sensors
+'Added more variables (ULD, AirT) to RTV, and retained RTV for 30 minutes: Alan Griffiths, Apr 2022
 
 '----- DECLARATIONS
 PreserveVariables 
@@ -48,16 +49,18 @@ DataTable(Results,true,-1)
 
 EndTable
 
-DataTable(RTV,true,1)
+DataTable(RTV,true,180)
   OpenInterval       
   DataInterval(0,10,Sec,10)                   
   Sample(1, ExFlow,FP2)
   Sample (1, InFlow, FP2)
   Sample(1, LLD,IEEE4)
+  Sample(1, ULD,IEEE4)
   Sample(1, Pres,FP2)
   Sample (1, TankP,FP2)
   Sample (1, HV,FP2)
   Sample (1, RelHum, FP2)
+  Sample (1, AirT, FP2)
 EndTable
 
 '----- MAIN PROGRAM
