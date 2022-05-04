@@ -773,10 +773,11 @@ class DataStore(object):
         """
         if table_name is None:
             import traceback
+
             tb = traceback.format_exc()
             _logger.warning(f"get_rows called with table_name = None\n{tb}")
             return None, []
-        
+
         t0 = datetime.datetime.now(datetime.timezone.utc)
         t_token = LatestRowToken(start_time)
         last_rowid = t_token.latest_rowid
@@ -839,7 +840,9 @@ class DataStore(object):
         except sqlite3.OperationalError as ex:
             # sqlite3.OperationalError: no such table: RTV
             if ex.args == (f"no such table: {table_name}",):
-                _logger.warning(f"Tried to read from {table_name} but table does not exist")
+                _logger.warning(
+                    f"Tried to read from {table_name} but table does not exist"
+                )
                 return None, []
             else:
                 raise ex

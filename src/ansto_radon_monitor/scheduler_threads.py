@@ -201,6 +201,7 @@ class DataThread(threading.Thread):
         except Exception as ex:
             _logger.error(f"Error while running measurement: {ex}, reconnecting")
             import traceback
+
             _logger.error(f"{traceback.format_exc()}")
             self.reconnect_func()
 
@@ -732,7 +733,7 @@ class DataLoggerThread(DataThread):
             try:
                 device.pakbus.link._serial.close()
             except Exception as ex:
-                _logger.error(f'Error while trying to close serial port: {ex}')
+                _logger.error(f"Error while trying to close serial port: {ex}")
 
         self.connect_to_datalogger(self._config)
 
@@ -761,7 +762,9 @@ class DataLoggerThread(DataThread):
                 # self._tolerate_hang = True
                 self.update_heartbeat_time()
                 # TODO: handle 'unable to connect' error
-                self.tables = [str(itm, "ascii") for itm in self._datalogger.list_tables()]
+                self.tables = [
+                    str(itm, "ascii") for itm in self._datalogger.list_tables()
+                ]
                 # table discovery can be slow too
                 self.update_heartbeat_time()
                 # Filter the tables - only include the ones which are useful
@@ -792,7 +795,6 @@ class DataLoggerThread(DataThread):
         except Exception as ex:
             _logger.error(f"Error finalising connection to datalogger: {ex}")
             self.reconnect_func()
-        
 
     def measurement_func(self):
         # if there is not yet a connection, then do nothing
@@ -832,7 +834,6 @@ class DataLoggerThread(DataThread):
                         msg = f"Received data ({total_num_records} records) from table {destination_table_name} with start_date = {update_time}."
                         _logger.debug(msg)
                         self.status["link"] = msg
-
 
                         for itm in data:
                             itm = fix_record(itm)
@@ -922,8 +923,8 @@ class DataLoggerThread(DataThread):
             f"Detector: {self.detectorName}, {pprint.pformat(progstat)}",
         )
         # TODO: work out which file is running from progstat
-        fname = str(progstat['ProgName'], 'utf-8')
-        data_file = str(self._datalogger.getfile(fname), 'utf-8')
+        fname = str(progstat["ProgName"], "utf-8")
+        data_file = str(self._datalogger.getfile(fname), "utf-8")
         self._datastore.add_log_message(
             "LoggerFirmware", f"Detector: {self.detectorName}, \n{data_file}"
         )
