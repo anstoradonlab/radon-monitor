@@ -61,6 +61,7 @@ class DetectorConfig:
 
     name: str = ""
     serial_port: str = ""
+    baudrate: int = 115200
     kind: str = ""
     datalogger_serial: int = -1
     csv_file_pattern: typing.Optional[str] = None

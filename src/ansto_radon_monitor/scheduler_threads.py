@@ -13,6 +13,7 @@ import traceback
 from typing import Dict
 
 import numpy as np
+import serial
 from pycampbellcr1000 import CR1000
 from pycampbellcr1000.utils import ListDict
 
@@ -196,7 +197,7 @@ class DataThread(threading.Thread):
         """call measurement function and schedule next"""
         try:
             self.measurement_func()
-            
+
         except Exception as ex:
             _logger.error(f"Error while running measurement: {ex}, reconnecting")
             import traceback
@@ -709,10 +710,20 @@ class DataLoggerThread(DataThread):
         self.state_changed.set()
 
     def _connect(self, detector_config):
-        self._datalogger: CR1000 = CR1000.from_url(
-            detector_config.serial_port, timeout=2
+        # don't use from_url ref:
+        # https://github.com/LionelDarras/PyCampbellCR1000/issues/21#issuecomment-1117096281
+        # use port=None to create a serial port object without opening the underlying port
+        ser = serial.Serial(
+            port=None,
+            baudrate=detector_config.baudrate,
+            timeout=2,
+            bytesize=serial.EIGHTBITS,
+            parity=serial.PARITY_NONE,
+            stopbits=1,
         )
-    
+        ser.port = detector_config.serial_port
+        self._datalogger = CR1000(ser)
+
     def reconnect_func(self):
         """This gets called if 'measurement_func' fails"""
         if self._datalogger is not None:
@@ -722,7 +733,7 @@ class DataLoggerThread(DataThread):
                 device.pakbus.link._serial.close()
             except Exception as ex:
                 _logger.error(f'Error while trying to close serial port: {ex}')
-            
+
         self.connect_to_datalogger(self._config)
 
     @task_description("Data logger: initialize")
@@ -756,7 +767,7 @@ class DataLoggerThread(DataThread):
                 # Filter the tables - only include the ones which are useful
                 tables_to_use = ["Results", "RTV"]
                 self.tables = [itm for itm in self.tables if itm in tables_to_use]
-                
+
                 self.status["link"] = "connected"
                 self.status["serial"] = int(self._datalogger.getprogstat()["SerialNbr"])
                 if not detector_config.datalogger_serial == -1:
