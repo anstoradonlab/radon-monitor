@@ -2,6 +2,8 @@ import ctypes
 import logging
 import math
 import struct
+import os
+from typing import List
 
 import u12
 
@@ -9,6 +11,30 @@ _logger = logging.getLogger(__name__)
 
 # reference for Labjack interface:
 #
+
+def bool_list_to_int(a):
+    """
+    convert a list of boolean flags into an integer-based bitfield
+
+    The boolean flags toggle the bits from the LSB,
+    i.e. a[0] corresponds to the least significant bit,
+    so the list written out is in the reverse order to the binary 
+    representation printed using bin(bitfield)
+    """
+    bitfield = 0
+    for ii in range(len(a)):
+        bitfield = bitfield | int(a[ii]) << ii
+    return bitfield
+
+def int_to_bool_list(bitfield, numbits):
+    """
+    Convert an integer-based bitfield into a list of boolean flags
+    """
+    a = [False for ii in range(numbits)]
+    for ii in range(numbits):
+        a[ii] = bool(bitfield >> ii & 1)
+    return a
+
 
 
 class LabjackWrapper:
@@ -25,18 +51,84 @@ class LabjackWrapper:
     """
 
     def __init__(self, labjack_id=-1, serialNumber=None):
-        if serialNumber is not None:
-            self.device = u12.U12(debug=False, serialNumber=serialNumber)
+        try:
+            if serialNumber is not None:
+                self.device = u12.U12(debug=False, serialNumber=serialNumber)
+            else:
+                self.device = u12.U12(id=labjack_id, debug=False)
+            self.max_channel = 5
+            try:
+                self.reset_dio()
+            except Exception as ex:
+                _logger.error(f"Error calling reset_dio(): {ex}")
+                raise
+        except Exception as ex:
+            _logger.error(f"Unable to connect to labjack because of error: {ex}")
+
+
+    def set_digital_outputs(self, state: List[bool]):
+        """
+        Set all digital outputs 
+
+        All digitial IO lines are set to output mode
+
+        Channels are set to high or low depending on the values of state.  
+        Channel 0 is set from state[0], channel 1 from state[1], etc.
+
+        state must have length of 16
+        """
+        d = self.device
+        assert(len(state) == 16)
+        if os.name == 'nt':
+            # the IO lines are unused - but we need to set something
+            trisIO = 0
+            stateIO = 0
+            stateD = bool_list_to_int(state)
+            # trisD 1-valued bits to signal digital output
+            all_high = 2**16-1
+            d.digitalIO(trisD=all_high, stateD=stateD, updateDigital=1, trisIO=trisIO, stateIO=stateIO)
         else:
-            self.device = u12.U12(id=labjack_id, debug=False)
-        self.max_channel = 5
-        self.reset_dio()
+            D15toD8States = bool_list_to_int(state[8:16])
+            D7toD0States = bool_list_to_int(state[:8])
+
+            status = d.rawDIO(
+                D15toD8Directions = 0,
+                D7toD0Directions = 0,
+                D15toD8States = D15toD8States,
+                D7toD0States = D7toD0States,
+                IO3toIO0DirectionsAndStates = 0,
+                UpdateDigital = True 
+            )
+
+
+
 
     def reset_dio(self):
         """Sets output to zero on all channels while also configuring all DIO channels as output"""
         d = self.device
-        for ii in range(self.max_channel + 1):
-            ret = d.eDigitalOut(ii, 0)
+        # eDigitalOut doesn't work on Windows, so use the low-level commands
+        if os.name == 'nt':
+            # there are 16 DIO channels, here is a bit flag of 16 1s
+            all_high = 2**16-1
+            d.digitalIO(trisD=all_high, stateD=0, updateDigital=1, trisIO=0, stateIO=0)
+        else:
+            all_high_byte = 2**8-1
+            #Args: 
+            #D15toD8Directions, A byte where 0 = Output, 1 = Input for D15-8
+            #D7toD0Directions, A byte where 0 = Output, 1 = Input for D7-0
+            #D15toD8States, A byte where 0 = Low, 1 = High for D15-8
+            #D7toD0States, A byte where 0 = Low, 1 = High for D7-0
+            #IO3toIO0DirectionsAndStates, Bits 7-4: Direction, 3-0: State
+            #UpdateDigital, True if you want to update the IO/D line. False to
+            #             False to just read their values.
+            status = d.rawDIO(
+                D15toD8Directions = 0,
+                D7toD0Directions = 0,
+                D15toD8States = 0,
+                D7toD0States = 0,
+                IO3toIO0DirectionsAndStates = 0,
+                UpdateDigital = True 
+            )
 
     def set_dio(self, channel, state):
         """Set one DIO channel to 1 or 0"""
@@ -48,7 +140,20 @@ class LabjackWrapper:
 
     @property
     def dio_states(self):
-        raise NotImplementedError
+        """
+        Read the DIO states
+        """
+        d = self.device
+        if os.name == 'nt':
+            status = d.digitalIO(trisD=all_high, stateD=stateD, updateDigital=0, trisIO=trisIO, stateIO=stateIO)
+            direction = int_to_bool_list(status['trisD'], 16)
+            level = int_to_bool_list(status['stateD', 16])
+        else:
+            status = d.rawDIO(UpdateDigital=False)
+            direction = int_to_bool_list(status['D7toD0Directions'], 8) + int_to_bool_list(status['D15toD8Directions'], 8)
+            level = int_to_bool_list(status['D7toD0States'], 8) + int_to_bool_list(status['D15toD8States'], 8)
+
+        return level, direction
 
         # this would have the side-effect of setting all channels to input
         # if this function is needed, it will need to use rawDIO on linux, digitialIO on
@@ -81,29 +186,44 @@ class LabjackWrapper:
         d = self.device
         values = []
         for ii in range(2):
-            a_in = d.eAnalogIn(0)
+            try:
+                a_in = d.eAnalogIn(ii)
+            except Exception as ex:
+                _logger.error(f"Error reading from labjack analogue channel {ii}: {ex}")
+                values.append(None)
+                continue
+            
             # what to do if overVoltage??
             # this is indicated by a_in["overVoltage"]
             # TODO: log as error
+            if a_in['overVoltage']:
+                _logger.error(f"Labjack analogue channel {ii} is over voltage")
             values.append(a_in["voltage"])
-            assert a_in["idnum"] == d.id
+
+            # remember - special value of -1 means 'talk to any labjack'
+            if d.id != -1 and a_in["idnum"] != d.id:
+                _logger.error(f"Labjack reports IDNUM={a_in['idnum']} but we expected {d.id}")
 
         return values
 
     @property
     def serial_number(self):
         d = self.device
-        # by default, this reads the bytes which make up the serial number
-        r = d.rawReadRAM()
-        # >>> print(r)
-        # {'DataByte3': 5, 'DataByte2': 246, 'DataByte1': 139, 'DataByte0': 170}
-        serial_no_bytes = [
-            r["DataByte3"],
-            r["DataByte2"],
-            r["DataByte1"],
-            r["DataByte0"],
-        ]
-        serial_no = struct.unpack(">I", struct.pack("BBBB", *serial_no_bytes))[0]
+        # serial no is four bytes at address 0
+        if os.name == 'nt':
+            serial_no_bytes = d.readMem(0)
+            serial_no = struct.unpack(">I", struct.pack("BBBB", *serial_no_bytes))[0]
+        else:
+            r = d.rawReadRAM()
+            # >>> print(r)
+            # {'DataByte3': 5, 'DataByte2': 246, 'DataByte1': 139, 'DataByte0': 170}
+            serial_no_bytes = [
+                r["DataByte3"],
+                r["DataByte2"],
+                r["DataByte1"],
+                r["DataByte0"],
+            ]
+            serial_no = struct.unpack(">I", struct.pack("BBBB", *serial_no_bytes))[0]
         return serial_no
 
 
@@ -128,19 +248,27 @@ class CalBoxLabjack:
         self.no_hardware_mode = True
         self.serial_number = None
 
-        if labjack_id is not None:
-            self.lj = LabjackWrapper(labjack_id, serialNumber=serialNumber)
-            self.no_hardware_mode = False
-            self.serial_number = self.lj.serial_number
-            _logger.info(
-                f"Connected to labjack with serial number: {self.serial_number}"
-            )
-        else:
-            _logger.warning(
-                f"Running in test mode without trying to connect to labjack because labjack_id has been set to 'None'"
-            )
-
+        # initialise some flags on the computer-side (no comms)
         self._init_flags()
+
+        try:
+            if labjack_id is not None:
+                self.lj = LabjackWrapper(labjack_id, serialNumber=serialNumber)
+                self.no_hardware_mode = False
+                self.serial_number = self.lj.serial_number
+                _logger.info(
+                    f"Connected to labjack with serial number: {self.serial_number}"
+                )
+            else:
+                _logger.warning(
+                    f"Running in test mode without trying to connect to labjack because labjack_id has been set to 'None'"
+                )
+
+            self._send_state_to_device()
+        except Exception as ex:
+            _logger.error(f"Unable to connect to labjack because of error: {ex}")
+            import traceback
+            _logger.error(f"{traceback.format_exc()}")
 
     def _init_flags(self):
         # current state of DIO channel (boolean - True/False)
@@ -243,11 +371,11 @@ class CalBoxLabjack:
 
     def _send_state_to_device(self):
         if not self.no_hardware_mode:
-            settings = []
+            all_states = [False for ii in range(16)]
             for k, state in self.digital_output_state.items():
                 channel = self.digital_output_channel[k]
-                self.lj.set_dio(channel, state)
-                settings.append((channel, state))
+                all_states[channel] = state
+                self.lj.set_digital_outputs(all_states)
             _logger.debug(
                 f"Labjack digital output ports set: {self.digital_output_state.items()}"
             )

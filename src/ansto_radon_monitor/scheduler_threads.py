@@ -155,6 +155,9 @@ class DataThread(threading.Thread):
         )
         _logger.debug(f"Scheduler queue: {self._scheduler.queue}")
 
+    def reconnect_func(self):
+        _logger.debug(f"Reconnect function - stub")
+
     def shutdown_func(self):
         _logger.debug(f"Shutdown function")
 
@@ -191,7 +194,15 @@ class DataThread(threading.Thread):
     # @task_description("Poll the measurement hardware")
     def run_measurement(self):
         """call measurement function and schedule next"""
-        self.measurement_func()
+        try:
+            self.measurement_func()
+            
+        except Exception as ex:
+            _logger.error(f"Error while running measurement: {ex}, reconnecting")
+            import traceback
+            _logger.error(f"{traceback.format_exc()}")
+            self.reconnect_func()
+
         self._scheduler.enter(
             delay=self.seconds_until_next_measurement,
             priority=0,
@@ -293,7 +304,7 @@ class CalibrationUnitThread(DataThread):
             except Exception as ex:
                 _logger.error(
                     "Unable to connect to calibration system LabJack using "
-                    f"ID: {labjack_id} serial: {serialNumber}.  Retrying in 10sec."
+                    f"ID: {labjack_id} serial: {serialNumber} because of error: {ex}.  Retrying in 10sec."
                 )
                 self._scheduler.enter(
                     delay=10,
@@ -344,8 +355,9 @@ class CalibrationUnitThread(DataThread):
         t = datetime.datetime.now(datetime.timezone.utc)
         t = t.replace(microsecond=0)
         data = {"Datetime": t}
-        data.update(self._labjack.analogue_states)
-        data.update(self._labjack.digital_output_state)
+        if self._labjack is not None:
+            data.update(self._labjack.analogue_states)
+            data.update(self._labjack.digital_output_state)
         # send measurement to datastore
         self._datastore.add_record(self._data_table_name, data)
 
@@ -700,39 +712,82 @@ class DataLoggerThread(DataThread):
         self._datalogger: CR1000 = CR1000.from_url(
             detector_config.serial_port, timeout=2
         )
+    
+    def reconnect_func(self):
+        """This gets called if 'measurement_func' fails"""
+        if self._datalogger is not None:
+            device = self._datalogger
+            self._datalogger = None
+            try:
+                device.pakbus.link._serial.close()
+            except Exception as ex:
+                _logger.error(f'Error while trying to close serial port: {ex}')
+            
+        self.connect_to_datalogger(self._config)
 
     @task_description("Data logger: initialize")
     def connect_to_datalogger(self, detector_config):
-        with self._lock:
-            self._connect(detector_config)
-            # TODO: handle 'unable to connect' error
-            self.tables = [str(itm, "ascii") for itm in self._datalogger.list_tables()]
-            # Filter the tables - only include the ones which are useful
-            tables_to_use = ["Results", "RTV"]
-            self.tables = [itm for itm in self.tables if itm in tables_to_use]
-            
-            self.status["link"] = "connected"
-            self.status["serial"] = int(self._datalogger.getprogstat()["SerialNbr"])
-            if not detector_config.datalogger_serial == -1:
-                if not self.status["serial"] == detector_config.datalogger_serial:
+        try:
+            with self._lock:
+                self.status["link"] = "connecting to datalogger"
+                try:
+                    self._connect(detector_config)
+                except Exception as ex:
                     _logger.error(
-                        "Datalogger found, but serial number does not match configuration (required serial: {datalogger_config.serial}, discovered serial: {self.status['serial'] }"
+                        "Unable to connect to data logger "
+                        f"config: {detector_config} because of error: {ex}.  Retrying in 30sec."
                     )
-                    self._datalogger.close()
-                    self.status["link"] = "disconnected"
-                    # TODO: the user needs to be informed of this more clearly
+                    self._scheduler.enter(
+                        delay=30,
+                        priority=-1000,  # needs to happend before anything else will work
+                        action=self.connect_to_datalogger,
+                        kwargs={"detector_config": detector_config},
+                    )
+                    return
 
-            if hasattr(self._datalogger.pakbus.link, "baudrate"):
-                _logger.info(
-                    f"Connected to datalogger (serial {self.status['serial']}) using serial port, baudrate: {self._datalogger.pakbus.link.baudrate}"
+                # connect can take a long time, but this is Ok
+                # TODO: maybe set this flag:
+                # self._tolerate_hang = True
+                self.update_heartbeat_time()
+                # TODO: handle 'unable to connect' error
+                self.tables = [str(itm, "ascii") for itm in self._datalogger.list_tables()]
+                # table discovery can be slow too
+                self.update_heartbeat_time()
+                # Filter the tables - only include the ones which are useful
+                tables_to_use = ["Results", "RTV"]
+                self.tables = [itm for itm in self.tables if itm in tables_to_use]
+                
+                self.status["link"] = "connected"
+                self.status["serial"] = int(self._datalogger.getprogstat()["SerialNbr"])
+                if not detector_config.datalogger_serial == -1:
+                    if not self.status["serial"] == detector_config.datalogger_serial:
+                        _logger.error(
+                            "Datalogger found, but serial number does not match configuration (required serial: {datalogger_config.serial}, discovered serial: {self.status['serial'] }"
+                        )
+                        self._datalogger.close()
+                        self.status["link"] = "disconnected"
+                        # TODO: the user needs to be informed of this more clearly
+
+                if hasattr(self._datalogger.pakbus.link, "baudrate"):
+                    _logger.info(
+                        f"Connected to datalogger (serial {self.status['serial']}) using serial port, baudrate: {self._datalogger.pakbus.link.baudrate}"
+                    )
+
+                # set this to a long time ago
+                self._last_time_check = datetime.datetime.min.replace(
+                    tzinfo=datetime.timezone.utc
                 )
 
-            # set this to a long time ago
-            self._last_time_check = datetime.datetime.min.replace(
-                tzinfo=datetime.timezone.utc
-            )
+        except Exception as ex:
+            _logger.error(f"Error finalising connection to datalogger: {ex}")
+            self.reconnect_func()
+        
 
     def measurement_func(self):
+        # if there is not yet a connection, then do nothing
+        if self._datalogger is None:
+            return
+
         # TODO: handle lost connection
         self.status["link"] = "retrieving data"
         with self._lock:

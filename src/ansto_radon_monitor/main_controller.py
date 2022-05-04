@@ -219,7 +219,8 @@ class MonitorThread(threading.Thread):
                         # not a DataThread, no need to monitor
                         continue
                     age = t.heartbeat_age
-                    if age > 10:
+                    max_heartbeat_age_seconds = 10
+                    if age > max_heartbeat_age_seconds:
                         _logger.error(
                             f"Thread {t.name} appears to be stuck (no heartbeat for {age} seconds).  A stack trace of all threads follows:"
                         )

@@ -771,6 +771,12 @@ class DataStore(object):
         TODO: doc fully
         [done] TODO: the 'start_time' should be replaced or augmented with a rowid
         """
+        if table_name is None:
+            import traceback
+            tb = traceback.format_exc()
+            _logger.warning(f"get_rows called with table_name = None\n{tb}")
+            return None, []
+        
         t0 = datetime.datetime.now(datetime.timezone.utc)
         t_token = LatestRowToken(start_time)
         last_rowid = t_token.latest_rowid
@@ -785,6 +791,7 @@ class DataStore(object):
                     detector_names_dict[r["id"]] = r["name"]
             except Exception as e:
                 _logger.error(f'Unable to read "detector_names" table, error: {e}')
+                return None, []
 
             rowid_max = self.con.execute(
                 f"select max(rowid) from {table_name}"
@@ -834,6 +841,8 @@ class DataStore(object):
             if ex.args == (f"no such table: {table_name}",):
                 _logger.warning(f"Tried to read from {table_name} but table does not exist")
                 return None, []
+            else:
+                raise ex
         except sqlite3.ProgrammingError as ex:
             # sqlite3.ProgrammingError: Cannot operate on a closed database.
             if ex.args == ("Cannot operate on a closed database.",):
