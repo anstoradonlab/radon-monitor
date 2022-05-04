@@ -725,6 +725,13 @@ class DataLoggerThread(DataThread):
         ser.port = detector_config.serial_port
         self._datalogger = CR1000(ser)
 
+    def shutdown_func(self):
+        # the CR1000 finalizer (__del__) closes the port and
+        # sends a goodbye message to the datalogger.  It is
+        # an 'implementation detail' of Cython that this will
+        # happen right away
+        self._datalogger = None
+
     def reconnect_func(self):
         """This gets called if 'measurement_func' fails"""
         if self._datalogger is not None:
