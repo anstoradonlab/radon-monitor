@@ -2,21 +2,17 @@
 
 # WARNING: this test needs the logger and labjack to be plugged in!
 
-import pytest
 import logging
-import time
-import yaml
-import tempfile
 import pprint
-from ansto_radon_monitor.configuration import (
-    parse_config,
-    parse_args,
-    config_from_commandline,
-    DetectorKind,
-)
+import tempfile
+import time
 
+import pytest
+import yaml
+from ansto_radon_monitor.configuration import (DetectorKind,
+                                               config_from_commandline,
+                                               parse_args, parse_config)
 from ansto_radon_monitor.main_controller import MainController, initialize
-
 
 __author__ = "Alan Griffiths"
 __copyright__ = "Alan Griffiths"

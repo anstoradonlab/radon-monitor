@@ -1,18 +1,20 @@
 # -*- coding: utf-8 -*-
 
-import pytest
-import tempfile
-import os
-import datetime
 import copy
+import datetime
+import os
+import tempfile
 
+import pytest
 from ansto_radon_monitor.datastore import DataStore, TableStorage
 
 __author__ = "Alan Griffiths"
 __copyright__ = "Alan Griffiths"
 __license__ = "mit"
 
-t0 = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0, second=0, minute=0, hour=0)
+t0 = datetime.datetime.now(datetime.timezone.utc).replace(
+    microsecond=0, second=0, minute=0, hour=0
+)
 row = {"Datetime": t0, "RecNum": 103, "LLD": 123.0}
 
 

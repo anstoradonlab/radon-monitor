@@ -1,16 +1,12 @@
 # -*- coding: utf-8 -*-
 
-import pytest
+import json
 import logging
 
-import json
-from ansto_radon_monitor.configuration import (
-    parse_config,
-    parse_args,
-    config_from_commandline,
-    DetectorKind,
-)
-
+import pytest
+from ansto_radon_monitor.configuration import (DetectorKind,
+                                               config_from_commandline,
+                                               parse_args, parse_config)
 
 __author__ = "Alan Griffiths"
 __copyright__ = "Alan Griffiths"
