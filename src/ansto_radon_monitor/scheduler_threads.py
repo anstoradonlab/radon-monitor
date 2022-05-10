@@ -266,6 +266,11 @@ class CalibrationUnitThread(DataThread):
         # Labjack API needs None for serialNumber if we are to ignore it
         if serialNumber == -1:
             serialNumber = None
+        
+        # initial labjack id/serial number to be used for reconnection
+        self._init_labjack_id = labjack_id
+        self._init_serialNumber = serialNumber
+
         # Note: this code is run in the main thread, so avoid doing anything which
         # might block here (instead, add tasks to the scheduler which is called
         # inside )
@@ -288,15 +293,30 @@ class CalibrationUnitThread(DataThread):
         if config.kind == "mock":
             labjack_id = None
 
-        self._scheduler.enter(
-            delay=0,
-            priority=self._connection_task_priority,  # needs to happend before anything else will work
-            action=self.connect_to_labjack,
-            kwargs={"labjack_id": labjack_id, "serialNumber": serialNumber},
-        )
+        self._schedule_connection(labjack_id, serialNumber)
 
         # ensure that the scheduler function is run immediately on startup
         self.state_changed.set()
+
+    def _cancel_tasks(self, task_priority):
+        for itm in self._scheduler.queue:
+            if itm.priority == task_priority:
+                self._scheduler.cancel(itm)
+
+    def _schedule_connection(self, labjack_id, serialNumber, delay=10):
+        # cancel any current cal/bg tasks
+        self._cancel_tasks(self._calibration_tasks_priority)
+        self._cancel_tasks(self._background_tasks_priority)
+        self._cancel_tasks(self._connection_task_priority)
+        
+        self._labjack = None
+        self._scheduler.enter(
+                    delay=delay,
+                    priority=self._connection_task_priority,  # high priority - needs to happend before anything else will work
+                    action=self.connect_to_labjack,
+                    kwargs={"labjack_id": labjack_id, "serialNumber": serialNumber},
+                )
+
 
     @task_description("Calibration unit: initialize")
     def connect_to_labjack(self, labjack_id, serialNumber):
@@ -308,19 +328,34 @@ class CalibrationUnitThread(DataThread):
                     "Unable to connect to calibration system LabJack using "
                     f"ID: {labjack_id} serial: {serialNumber} because of error: {ex}.  Retrying in 10sec."
                 )
-                self._scheduler.enter(
-                    delay=10,
-                    priority=self._connection_task_priority,  # needs to happend before anything else will work
-                    action=self.connect_to_labjack,
-                    kwargs={"labjack_id": labjack_id, "serialNumber": serialNumber},
-                )
+                self._schedule_connection(labjack_id, serialNumber)
 
     @task_description("Calibration unit: flush source")
     def set_flush_state(self):
-        self._datastore.add_log_message(
-            "CalibrationEvent", f"Begun flushing radon calibration source"
-        )
-        self._labjack.flush()
+        try:
+            self._labjack.flush()
+            self._datastore.add_log_message(
+                "CalibrationEvent", f"Begun flushing radon calibration source"
+            )
+        except Exception as ex:
+            _logger.error(
+                    "Unable set flush state on Labjack "
+                    f" because of error: {ex}.  Attempting to reconnect and reset in 10sec."
+                )
+            self._schedule_connection(self._init_labjack_id, self._init_serialNumber)
+            
+
+    def _run_or_reset(self, func, description):
+        """Run a function, but on failure log the exception and attempt to reconnect to the logger"""
+        try:
+            func()
+        except Exception as ex:
+            _logger.error(
+                    "Unable to {description} "
+                    f" because of error: {ex}.  Attempting to reconnect and reset in 10sec."
+                )
+            self._schedule_connection(self._init_labjack_id, self._init_serialNumber)
+
 
     @task_description("Calibration unit: inject from source")
     def set_inject_state(self):
@@ -331,27 +366,27 @@ class CalibrationUnitThread(DataThread):
         # while flow is turned off (which would lead to a very
         # high radon concentration in the detector)
         self._labjack.reset_background()
-        self._labjack.inject()
+        self._run_or_reset(self._labjack.inject, "begin source injection")
 
     @task_description("Calibration unit: switch to background state")
     def set_background_state(self):
         self._datastore.add_log_message("CalibrationEvent", f"Begun background cycle")
-        self._labjack.start_background()
+        self._run_or_reset(self._labjack.start_background, "enter background state")
 
     @task_description("Calibration unit: return to idle")
     def set_default_state(self):
         self._datastore.add_log_message(
             "CalibrationEvent", f"Return to normal operation"
         )
-        self._labjack.reset_all()
+        self._run_or_reset(self._labjack.reset_all, "return to normal operation")
 
     def set_nonbackground_state(self):
         self._datastore.add_log_message("CalibrationEvent", f"Left background state")
-        self._labjack.reset_background()
+        self._run_or_reset(self._labjack.reset_background, "leave background state")
 
     def set_noncalibration_state(self):
         self._datastore.add_log_message("CalibrationEvent", f"Left calibration state")
-        self._labjack.reset_calibration()
+        self._run_or_reset(self._labjack.reset_calibration, "leave calibration state")
 
     def measurement_func(self):
         t = datetime.datetime.now(datetime.timezone.utc)
@@ -360,6 +395,7 @@ class CalibrationUnitThread(DataThread):
         if self._labjack is not None:
             data.update(self._labjack.analogue_states)
             data.update(self._labjack.digital_output_state)
+        
         # send measurement to datastore
         self._datastore.add_record(self._data_table_name, data)
 
@@ -370,7 +406,7 @@ class CalibrationUnitThread(DataThread):
 
         If measurement is due at the same time as an action, perform the action first"""
         with self._lock:
-            self.measurement_func()
+            self._run_or_reset(self.measurement_func, "get Labjack state")
             self._scheduler.enter(
                 delay=self.seconds_until_next_measurement,
                 priority=self._measurement_task_priority,
@@ -505,22 +541,14 @@ class CalibrationUnitThread(DataThread):
             self._datastore.add_log_message(
                 "CalibrationEvent", f"Cancelling any pending background cycles"
             )
-            tasks_to_remove = [
-                itm
-                for itm in self._scheduler.queue
-                if itm.priority == self._calibration_tasks_priority
-                or itm.priority == self._schedule_a_cal_tasks_priority
-            ]
-            for itm in tasks_to_remove:
-                self._scheduler.cancel(itm)
-
+            self._cancel_tasks(self._calibration_tasks_priority)
+            self._cancel_tasks(self._schedule_a_cal_tasks_priority)
             # schedule a task to reset the cal box
             self._scheduler.enter(
                 delay=0,
                 priority=0,
                 action=self.set_noncalibration_state,
             )
-
             self.state_changed.set()
 
     @task_description("Calibration unit: schedule recurring calibration")
@@ -616,24 +644,16 @@ class CalibrationUnitThread(DataThread):
         """cancel an in-progress background and all pending ones"""
         with self._lock:
             self._datastore.add_log_message(
-                "CalibrationEvent", f"Cancelling any pending calibration cycles"
+                "CalibrationEvent", f"Cancelling any pending background cycles"
             )
-            tasks_to_remove = [
-                itm
-                for itm in self._scheduler.queue
-                if itm.priority == self._background_tasks_priority
-                or itm.priority == self._schedule_a_bg_tasks_priority
-            ]
-            for itm in tasks_to_remove:
-                self._scheduler.cancel(itm)
-
+            self._cancel_tasks(self._background_tasks_priority)
+            self._cancel_tasks(self._schedule_a_bg_tasks_priority)
             # schedule a task to reset the cal box
             self._scheduler.enter(
                 delay=0,
                 priority=0,
                 action=self.set_nonbackground_state,
             )
-
             self.state_changed.set()
 
     @property
@@ -958,15 +978,31 @@ class DataLoggerThread(DataThread):
 
         return clock_offset, halfquery
 
+    def increment_datalogger_clock(self, increment_dt: float):
+        """
+        Adjust time by adding "increment_dt" seconds
+        """
+        t = increment_dt
+        increment_seconds = int(t)
+        increment_nanoseconds = int((t-increment_seconds)*1e9)
+        self._datalogger.pakbus.get_clock_cmd((increment_seconds, increment_nanoseconds))
+        hdr, msg, sdt1 = self._datalogger.send_wait(self._datalogger.pakbus.get_clock_cmd((increment_seconds, increment_nanoseconds)))
+
+
     def synchronise_clock(
         self, maximum_time_difference_seconds=60, check_ntp_sync=True
     ):
         """Attempt to synchronise the clock on the datalogger with computer."""
         # NOTE: the api for adjusting the datalogger clock isn't accurate beyond 1 second
-        # TODO: maybe improve this situation
+        #       but I'm creating the underlying pakbus messages myself
+        #       search for function: increment_datalogger_clock
         minimum_time_difference_seconds = 1
         # TODO: check that the computer time is reliable, i.e. NTP sync
-        #
+        #       probably use this cross-platform solution https://github.com/cf-natali/ntplib
+        #       with a ntp server provided by the configuration
+        #       Fallback options are w32tm (windows:    https://superuser.com/questions/425233/how-can-i-check-a-systems-current-ntp-configuration)
+        #         ntpstat (Linux), dbus (Linux: https://raspberrypi.stackexchange.com/questions/80219/recommended-way-for-a-python-script-to-check-ntp-update-status-and-initiate-an )
+
         ntp_sync_ok = "unknown"  # TODO: flag this as true or false
         clock_offset, halfquery = self.get_clock_offset()
         self._datastore.add_log_message(
@@ -975,22 +1011,21 @@ class DataLoggerThread(DataThread):
         )
         if (
             maximum_time_difference_seconds is not None
-            and clock_offset > maximum_time_difference_seconds
+            and abs(clock_offset) > maximum_time_difference_seconds
         ):
             # don't touch the clock - something is amiss
             _logger.error(
-                f"Datalogger and computer clocks are out of synchronisation by more than {maximum_time_difference_seconds} seconds, not adjusting time"
+                f"Datalogger and computer clocks are out of synchronisation by more than {maximum_time_difference_seconds} seconds, which is unexpected. Not adjusting time (Hint: do the adjustment manually)"
             )
         elif (
             maximum_time_difference_seconds is not None
-            and clock_offset < minimum_time_difference_seconds
+            and abs(clock_offset) < minimum_time_difference_seconds
         ):
             _logger.info(
-                f"Datalogger and computer clocks are out of synchronisation by less than {minimum_time_difference_seconds} seconds, not adjusting time"
+                f"Datalogger and computer clocks are synchronised to within {minimum_time_difference_seconds} seconds, not adjusting time (actual difference: {clock_offset} sec)"
             )
         else:
-            new_time = datetime.datetime.now(datetime.timezone.utc) + halfquery
-            self._datalogger.settime(new_time)
+            self.increment_datalogger_clock(-clock_offset)
             clock_offset, halfquery = self.get_clock_offset()
             self._datastore.add_log_message(
                 "ClockCheck",
