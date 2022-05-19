@@ -239,9 +239,14 @@ class MainController(object):
         # a flag used to signal that the controller is shutting down
         self._shutting_down = False
         self._configuration = configuration
-        self._start_threads()
-        self.datastore.add_log_message("SystemEvent", "Startup")
-        self.datastore.add_log_message("ConfigurationDump", configuration.as_text())
+        try:
+            self._start_threads()
+            self.datastore.add_log_message("SystemEvent", "Startup")
+            self.datastore.add_log_message("ConfigurationDump", configuration.as_text())
+        except Exception as ex:
+            _logger.critical(f"Unable to start logging because of error: {ex}, {traceback.format_exc()}")
+            self.shutdown()
+
 
     def _start_threads(self):
         with self._thread_list_lock:
@@ -308,7 +313,9 @@ class MainController(object):
         if (threading.main_thread()).ident == threading.get_ident():
             # TODO: decide what *should* happen if shutdown is called from a thread other than the main one
             for itm in self._threads:
-                itm.join()
+                # only call join for active threads
+                if itm in threading.enumerate():
+                    itm.join()
         _logger.debug("Finished waiting for threads.")
 
     def shutdown_and_exit(self):

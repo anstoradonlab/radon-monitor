@@ -710,7 +710,7 @@ class DataLoggerThread(DataThread):
         super().__init__(*args, **kwargs)
         self.measurement_interval: int = 5  # TODO: from config?, this is in seconds
         self._config = detector_config
-        self._datalogger = None
+        self._datalogger: typing.Optional[CR1000] = None
         self.status = {"link": "connecting", "serial": None}
         self.name = "DataLoggerThread"
         self.detectorName = detector_config.name
@@ -985,8 +985,14 @@ class DataLoggerThread(DataThread):
         t = increment_dt
         increment_seconds = int(t)
         increment_nanoseconds = int((t-increment_seconds)*1e9)
-        self._datalogger.pakbus.get_clock_cmd((increment_seconds, increment_nanoseconds))
-        hdr, msg, sdt1 = self._datalogger.send_wait(self._datalogger.pakbus.get_clock_cmd((increment_seconds, increment_nanoseconds)))
+        if not hasattr(self._datalogger.pakbus, 'get_clock_cmd'):
+            # Handle the case where this is not a real datalogger
+            t = self._datalogger.gettime()
+            t += datetime.timedelta(seconds=increment_dt)
+            self._datalogger.settime(t)
+        else:
+            self._datalogger.pakbus.get_clock_cmd((increment_seconds, increment_nanoseconds))
+            hdr, msg, sdt1 = self._datalogger.send_wait(self._datalogger.pakbus.get_clock_cmd((increment_seconds, increment_nanoseconds)))
 
 
     def synchronise_clock(
@@ -1063,11 +1069,11 @@ class MockCR1000(object):
 
     def settime(self, t):
         time.sleep(0.01)
-        self.__timeoffset = datetime.datetime.now(datetime.timezone.utc) - t
+        self.__timeoffset = datetime.datetime.utcnow() - t
         time.sleep(0.01)
 
     def getprogstat(self):
-        return {"SerialNbr": "42", "Kind": "MOCK"}
+        return {"SerialNbr": "42", "Kind": "MOCK", "ProgName": b"Not_a_real_datalogger.cr8"}
 
     def getfile(self, fname):
         data = f"this is some file data\n\nFilename requested was: {fname}".encode(
@@ -1083,6 +1089,10 @@ class MockCR1000(object):
 
         This behaves in a similar way to CR1000.get_data_generator
         """
+        # handle start_date without timezone
+        if start_date is not None:
+            if start_date.tzinfo is None:
+                start_date = start_date.replace(tzinfo=datetime.timezone.utc)
         # number of records to return at once
         # Database is good with 1440 * 6, but if we
         # plan to query the rowid column later it's better to keep
