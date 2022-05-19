@@ -37,19 +37,6 @@ from .scheduler_threads import (CalibrationUnitThread, DataLoggerThread,
                                 DataMinderThread, MockDataLoggerThread)
 
 
-def setup_logging(loglevel, logfile=None):
-    """Setup basic logging
-
-    Args:
-        loglevel (int): minimum loglevel for emitting messages
-    """
-    # logformat = "[%(asctime)s] %(levelname)s:%(name)s:%(message)s"
-    logformat = "[%(levelname)1.1s %(asctime)s %(module)s:%(lineno)d %(threadName)s] %(message)s"
-    logging.basicConfig(
-        level=loglevel, stream=sys.stdout, format=logformat, datefmt="%Y-%m-%d %H:%M:%S"
-    )
-
-
 def register_sigint_handler(callback_func):
     """
     Register a signal handler to gracefully shut down when the user presses Ctrl-C
@@ -84,7 +71,6 @@ def initialize(configuration: Configuration, mode: str = "thread"):
         # ref: http://www.zerorpc.io/
         # NOTE: if zerorpc becomes a problem, consider switching to
         # https://jsonrpcserver.readthedocs.io/en/latest/examples.html
-        setup_logging(configuration.loglevel, configuration.logfile)
         controller = MainController(configuration)
         s = zerorpc.Server(controller)
         s.bind("ipc:///tmp/ansto-radon-monitor.ipc")

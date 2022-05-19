@@ -2,6 +2,7 @@
 import csv
 import datetime
 import logging
+from logging.handlers import RotatingFileHandler
 import os
 import pathlib
 import sqlite3
@@ -1283,7 +1284,7 @@ class DataStore(object):
 if __name__ == "__main__":
     import sys
 
-    def setup_logging(loglevel=logging.DEBUG):
+    def setup_test_logging(loglevel, logfile=None):
         """Setup basic logging
 
         Args:
@@ -1298,19 +1299,8 @@ if __name__ == "__main__":
             datefmt="%Y-%m-%d %H:%M:%S",
         )
 
-        # exclude messages for Pylink and Pycr1000
-        class Blacklist(logging.Filter):
-            def __init__(self):
-                self.blacklist = ["pycampbellcr1000", "pylink"]
 
-            def filter(self, record):
-                """return True to keep message"""
-                return not record.name in self.blacklist
-
-        for handler in logging.root.handlers:
-            handler.addFilter(Blacklist())
-
-    setup_logging()
+    setup_test_logging()
 
     class TestConfig:
         data_file = "test.sqlite"

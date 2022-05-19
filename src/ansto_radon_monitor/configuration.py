@@ -101,7 +101,7 @@ class Configuration:
         return pprint.pformat(self)
 
 
-def parse_config(raw_cfg):
+def parse_config(raw_cfg) -> Configuration:
     # define converters/validators for the various data types we use
     # a dict mapping a type to a convertor function
     converters = {
@@ -285,7 +285,7 @@ def config_from_commandline(
     return config, cmdline_args
 
 
-def config_from_yamlfile(filename):
+def config_from_yamlfile(filename) -> Configuration:
     _logger.info(f"Loading configuration from: {filename}")
     with open(filename, "rt") as fd:
         raw_cfg = yaml.safe_load(fd.read())

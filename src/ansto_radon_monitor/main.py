@@ -17,6 +17,8 @@ Note: This skeleton file can be safely removed if not needed!
 
 import argparse
 import logging
+from logging import StreamHandler
+from logging.handlers import RotatingFileHandler
 import sys
 import time
 
@@ -34,32 +36,48 @@ __license__ = "mit"
 _logger = logging.getLogger(__name__)
 
 
-def setup_logging(loglevel=logging.DEBUG):
-    """Setup basic logging
+def setup_logging(loglevel=logging.DEBUG, logfn=None):
+        """Setup basic logging
 
-    Args:
-        loglevel (int): minimum loglevel for emitting messages
-    """
-    # log all messages in UTC
-    logging.Formatter.converter = time.gmtime
+        Args:
+            loglevel (int): minimum loglevel for emitting messages
+            logfn (str): file name to log messages to (if None, don't log messages to file)
 
-    # logformat = "[%(asctime)s] %(levelname)s:%(name)s:%(message)s"
-    logformat = "[%(levelname)1.1s %(asctime)s %(module)s:%(lineno)d %(threadName)s] %(message)s"
-    logging.basicConfig(
-        level=loglevel, stream=sys.stdout, format=logformat, datefmt="%Y-%m-%d %H:%M:%S"
-    )
+        """
+        # exclude information messages for Pylink and Pycr1000
+        for mod in ['pycampbellcr1000', 'pylink']:
+            logging.getLogger(mod).setLevel(logging.CRITICAL)
 
-    # exclude messages for Pylink and Pycr1000
-    class Blacklist(logging.Filter):
-        def __init__(self):
-            self.blacklist = ["pycampbellcr1000", "pylink"]
+        rootlogger = logging.getLogger()
+        rootlogger.setLevel(loglevel)
+        # logformat = "[%(asctime)s] %(levelname)s:%(name)s:%(message)s"
+        log_format = "[%(levelname)1.1s %(asctime)s %(module)s:%(lineno)d %(threadName)s] %(message)s"
+        datefmt = "%Y-%m-%d %H:%M:%S"
 
-        def filter(self, record):
-            """return True to keep message"""
-            return not record.name in self.blacklist
+        # add a stream handler if non is present
+        if len(rootlogger.handlers) == 0:
+            stream_handler = StreamHandler(sys.stderr)
+            stream_handler.setLevel(loglevel)
+            rootlogger.addHandler(stream_handler)
 
-    for handler in logging.root.handlers:
-        handler.addFilter(Blacklist())
+
+        if logfn is not None:
+            # check for existing RotatingFileHandlers and remove them
+            for hdlr in rootlogger.handlers:
+                if isinstance(hdlr, RotatingFileHandler):
+                    rootlogger.removeHandler(hdlr)
+            
+            file_handler = RotatingFileHandler(logfn, mode='a', maxBytes=5*1024*1024, 
+                                            backupCount=10, encoding=None, delay=0)
+            log_formatter = logging.Formatter(log_format, datefmt=datefmt)
+            file_handler.setFormatter(log_formatter)
+            file_handler.setLevel(loglevel)
+            rootlogger.addHandler(file_handler)
+
+        log_formatter = logging.Formatter(log_format, datefmt=datefmt)
+        for hdlr in rootlogger.handlers:
+            hdlr.formatter = log_formatter
+
 
 
 def main(args):

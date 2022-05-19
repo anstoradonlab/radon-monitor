@@ -511,7 +511,7 @@ def list_all_u12():
 
 if __name__ == "__main__":
 
-    def setup_logging(loglevel, logfile=None):
+    def setup_test_logging(loglevel, logfile=None):
         """Setup basic logging
 
         Args:
@@ -528,7 +528,7 @@ if __name__ == "__main__":
 
     import sys
 
-    setup_logging(logging.DEBUG)
+    setup_test_logging(logging.DEBUG)
 
     for ljid in [-1, None]:
         print(f"Running with labjack ID {ljid}")
