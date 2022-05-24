@@ -3,9 +3,9 @@ import logging
 import math
 import os
 import struct
+import threading
 import time
 from typing import List
-import threading
 
 import u12
 
@@ -202,20 +202,20 @@ class LabjackWrapper:
         _logger.debug(f"Reading analog channels")
         d = self.device
         try:
-            a_in = d.aiSample(channels=[0,1], numChannels=2)
+            a_in = d.aiSample(channels=[0, 1], numChannels=2)
             # a_in is now something like: {'idnum': -1,
             #    'stateIO': 0,
-            #    'overVoltage': 999,  # 0 - not over voltage, >0 - over voltage 
+            #    'overVoltage': 999,  # 0 - not over voltage, >0 - over voltage
             #    'voltages': [2.5, 1.9677734375]}
         except Exception as ex:
             _logger.error(f"Error reading from labjack analogue channels: {ex}")
             if retries > 0:
                 time.sleep(0.1)
-                self.analogue_states(self, retries=retries-1)
+                self.analogue_states(self, retries=retries - 1)
             else:
                 return [None, None]
-            
-        if a_in['overVoltage'] > 0:
+
+        if a_in["overVoltage"] > 0:
             _logger.error(f"One of the Labjack analog channels is over voltage")
         # remember - special value of -1 means 'talk to any labjack'
         if d.id != -1 and a_in["idnum"] != d.id:
@@ -249,7 +249,7 @@ class LabjackWrapper:
 
 class CalBoxLabjack:
     """Hardware interface for the labjack inside our Cal Box.
-    
+
     Note: this is intended to be thread-safe
     TODO: maybe lock more, perhaps even the whole thing
     """

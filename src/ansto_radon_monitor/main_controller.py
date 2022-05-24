@@ -230,9 +230,10 @@ class MainController(object):
             self.datastore.add_log_message("SystemEvent", "Startup")
             self.datastore.add_log_message("ConfigurationDump", configuration.as_text())
         except Exception as ex:
-            _logger.critical(f"Unable to start logging because of error: {ex}, {traceback.format_exc()}")
+            _logger.critical(
+                f"Unable to start logging because of error: {ex}, {traceback.format_exc()}"
+            )
             self.shutdown()
-
 
     def _start_threads(self):
         with self._thread_list_lock:
@@ -423,13 +424,12 @@ class MainController(object):
         radon_detector=0,
         start_time=None,
     ):
-        print(flush_duration, inject_duration)
         self._cal_system_task.run_calibration(
-            flush_duration, inject_duration, start_time=None
+            flush_duration, inject_duration, start_time=start_time
         )
 
     def run_background(self, duration=12 * 3600, start_time=None):
-        self._cal_system_task.run_background(duration, start_time=None)
+        self._cal_system_task.run_background(duration, start_time=start_time)
 
     def stop_calibration(self):
         self._cal_system_task.cancel_calibration()
