@@ -266,7 +266,7 @@ class CalibrationUnitThread(DataThread):
         # Labjack API needs None for serialNumber if we are to ignore it
         if serialNumber == -1:
             serialNumber = None
-        
+
         # initial labjack id/serial number to be used for reconnection
         self._init_labjack_id = labjack_id
         self._init_serialNumber = serialNumber
@@ -308,15 +308,14 @@ class CalibrationUnitThread(DataThread):
         self._cancel_tasks(self._calibration_tasks_priority)
         self._cancel_tasks(self._background_tasks_priority)
         self._cancel_tasks(self._connection_task_priority)
-        
+
         self._labjack = None
         self._scheduler.enter(
-                    delay=delay,
-                    priority=self._connection_task_priority,  # high priority - needs to happend before anything else will work
-                    action=self.connect_to_labjack,
-                    kwargs={"labjack_id": labjack_id, "serialNumber": serialNumber},
-                )
-
+            delay=delay,
+            priority=self._connection_task_priority,  # high priority - needs to happend before anything else will work
+            action=self.connect_to_labjack,
+            kwargs={"labjack_id": labjack_id, "serialNumber": serialNumber},
+        )
 
     @task_description("Calibration unit: initialize")
     def connect_to_labjack(self, labjack_id, serialNumber):
@@ -335,15 +334,14 @@ class CalibrationUnitThread(DataThread):
         try:
             self._labjack.flush()
             self._datastore.add_log_message(
-                "CalibrationEvent", f"Begun flushing radon calibration source"
+                "CalibrationEvent", f"Began flushing radon calibration source"
             )
         except Exception as ex:
             _logger.error(
-                    "Unable set flush state on Labjack "
-                    f" because of error: {ex}.  Attempting to reconnect and reset in 10sec."
-                )
+                "Unable set flush state on Labjack "
+                f" because of error: {ex}.  Attempting to reconnect and reset in 10sec."
+            )
             self._schedule_connection(self._init_labjack_id, self._init_serialNumber)
-            
 
     def _run_or_reset(self, func, description):
         """Run a function, but on failure log the exception and attempt to reconnect to the logger"""
@@ -351,16 +349,15 @@ class CalibrationUnitThread(DataThread):
             func()
         except Exception as ex:
             _logger.error(
-                    "Unable to {description} "
-                    f" because of error: {ex}.  Attempting to reconnect and reset in 10sec."
-                )
+                "Unable to {description} "
+                f" because of error: {ex}.  Attempting to reconnect and reset in 10sec."
+            )
             self._schedule_connection(self._init_labjack_id, self._init_serialNumber)
-
 
     @task_description("Calibration unit: inject from source")
     def set_inject_state(self):
         self._datastore.add_log_message(
-            "CalibrationEvent", f"Begun injecting radon from calibration source"
+            "CalibrationEvent", f"Began injecting radon from calibration source"
         )
         # cancel background - so that we are not injecting
         # while flow is turned off (which would lead to a very
@@ -370,7 +367,7 @@ class CalibrationUnitThread(DataThread):
 
     @task_description("Calibration unit: switch to background state")
     def set_background_state(self):
-        self._datastore.add_log_message("CalibrationEvent", f"Begun background cycle")
+        self._datastore.add_log_message("CalibrationEvent", f"Began background cycle")
         self._run_or_reset(self._labjack.start_background, "enter background state")
 
     @task_description("Calibration unit: return to idle")
@@ -395,7 +392,7 @@ class CalibrationUnitThread(DataThread):
         if self._labjack is not None:
             data.update(self._labjack.analogue_states)
             data.update(self._labjack.digital_output_state)
-        
+
         # send measurement to datastore
         self._datastore.add_record(self._data_table_name, data)
 
@@ -427,14 +424,14 @@ class CalibrationUnitThread(DataThread):
             immediately), by default None
         """
         with self._lock:
-            _logger.debug(
-                f"run_calibration, parameters are flush_duration:{flush_duration}, inject_duration:{inject_duration}, start_time:{start_time}"
-            )
             log_start_time = start_time if start_time is not None else "now"
-            self._datastore.add_log_message(
-                "CalibrationEvent",
-                f"Calibration scheduled, start_time: {log_start_time}, flush_duration:{flush_duration}, inject_duration:{inject_duration}, start_time:{start_time}",
+            info_message = (
+                f"Calibration scheduled, start_time: {log_start_time}, "
+                f"flush_duration:{flush_duration}, "
+                f"inject_duration:{inject_duration}"
             )
+            _logger.info(info_message)
+            self._datastore.add_log_message("CalibrationEvent", info_message)
 
             p = self._calibration_tasks_priority
             if start_time is not None:
@@ -446,6 +443,7 @@ class CalibrationUnitThread(DataThread):
                 )
             else:
                 initial_delay_seconds = 0
+            print(initial_delay_seconds)
             #
             # begin flushing
             self._scheduler.enter(
@@ -472,9 +470,11 @@ class CalibrationUnitThread(DataThread):
                     - wiggle_room
                 )
             else:
-                delay_inject_start = flush_duration
+                delay_inject_start = flush_duration + initial_delay_seconds
 
             # start injection
+            info_message = f"Expecting to start injecting radon at: {datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=delay_inject_start)}"
+            _logger.info(info_message)
             self._scheduler.enter(
                 delay=delay_inject_start,
                 priority=p,
@@ -483,6 +483,8 @@ class CalibrationUnitThread(DataThread):
 
             # stop injection
             delay_inject_stop = delay_inject_start + inject_duration
+            info_message = f"Expecting to stop injecting radon at: {datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=delay_inject_stop)}"
+            _logger.info(info_message)
             self._scheduler.enter(
                 delay=delay_inject_stop,
                 priority=p,
@@ -520,12 +522,16 @@ class CalibrationUnitThread(DataThread):
                 initial_delay_seconds = 0
             #
             # begin background
+            info_message = f"Expecting to start background at: {datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=initial_delay_seconds)}"
+            _logger.info(info_message)
             self._scheduler.enter(
                 delay=initial_delay_seconds,
                 priority=p,
                 action=self.set_background_state,
             )
             # reset the background flags
+            info_message = f"Expecting to stop background at: {datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=initial_delay_seconds + duration)}"
+            _logger.info(info_message)
             self._scheduler.enter(
                 delay=initial_delay_seconds + duration,
                 priority=p,
@@ -984,16 +990,21 @@ class DataLoggerThread(DataThread):
         """
         t = increment_dt
         increment_seconds = int(t)
-        increment_nanoseconds = int((t-increment_seconds)*1e9)
-        if not hasattr(self._datalogger.pakbus, 'get_clock_cmd'):
+        increment_nanoseconds = int((t - increment_seconds) * 1e9)
+        if not hasattr(self._datalogger.pakbus, "get_clock_cmd"):
             # Handle the case where this is not a real datalogger
             t = self._datalogger.gettime()
             t += datetime.timedelta(seconds=increment_dt)
             self._datalogger.settime(t)
         else:
-            self._datalogger.pakbus.get_clock_cmd((increment_seconds, increment_nanoseconds))
-            hdr, msg, sdt1 = self._datalogger.send_wait(self._datalogger.pakbus.get_clock_cmd((increment_seconds, increment_nanoseconds)))
-
+            self._datalogger.pakbus.get_clock_cmd(
+                (increment_seconds, increment_nanoseconds)
+            )
+            hdr, msg, sdt1 = self._datalogger.send_wait(
+                self._datalogger.pakbus.get_clock_cmd(
+                    (increment_seconds, increment_nanoseconds)
+                )
+            )
 
     def synchronise_clock(
         self, maximum_time_difference_seconds=60, check_ntp_sync=True
@@ -1073,7 +1084,11 @@ class MockCR1000(object):
         time.sleep(0.01)
 
     def getprogstat(self):
-        return {"SerialNbr": "42", "Kind": "MOCK", "ProgName": b"Not_a_real_datalogger.cr8"}
+        return {
+            "SerialNbr": "42",
+            "Kind": "MOCK",
+            "ProgName": b"Not_a_real_datalogger.cr8",
+        }
 
     def getfile(self, fname):
         data = f"this is some file data\n\nFilename requested was: {fname}".encode(
