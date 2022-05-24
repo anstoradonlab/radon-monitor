@@ -89,7 +89,7 @@ class Configuration:
 
     foreground: bool = False
     loglevel: LogLevel = LogLevel(logging.ERROR)
-    logfile: pathlib.Path = pathlib.Path("radon_monitor_messages.log")
+    logfile: typing.Optional[pathlib.Path] = None
     pid_file: pathlib.Path = pathlib.Path("/tmp/ansto_radon_monitor.pid")
     data_dir: pathlib.Path = pathlib.Path(".", "data").absolute()
     data_file: typing.Optional[pathlib.Path] = None
@@ -278,8 +278,16 @@ def config_from_commandline(
     # if not config.data_dir.exists():
     #    _logger.error(f'Data storage directory "{config.data_dir}" does not exist.')
 
-    # TODO: get logging working from this function
-    print(f"Configuration parsed: {config}")
+    # check log file is writable
+    if config.logfile is None:
+        config.logfile = config.data_dir.joinpath('radon_monitor_messages.log')
+    try:
+        with open(config.logfile, 'at') as fd:
+            pass
+    except:
+        _logger.error(f"Unable to open log file for writing, log messages will"
+                    f" not be saved.  Filename: {config.logfile}")
+        config.logfile = None
     _logger.debug(f"Configuration parsed: {config}")
 
     return config, cmdline_args
