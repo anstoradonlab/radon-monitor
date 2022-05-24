@@ -2,7 +2,6 @@
 import csv
 import datetime
 import logging
-from logging.handlers import RotatingFileHandler
 import os
 import pathlib
 import sqlite3
@@ -12,6 +11,7 @@ import time
 import traceback
 import typing
 from collections import defaultdict
+from logging.handlers import RotatingFileHandler
 from sqlite3.dbapi2 import OperationalError
 from typing import Union
 
@@ -422,6 +422,12 @@ class DataStore(object):
     Data store backed by a sqlite database
     """
 
+    # global update time information
+    _update_time_lock = threading.RLock()
+    # this dictionary is keyd by a tuple of three strings
+    #  (self.data_file, table_name, detector_name)
+    _table_update_time = {}
+
     def __init__(self, config, readonly=False):
         self.data_file = str(config.data_file)
         self._config = config
@@ -569,8 +575,10 @@ class DataStore(object):
             cur = self.con.cursor()
             rows = cur.execute("select * from detector_names")
             name_to_id = {}
+            id_to_name = {}
             for r in rows:
                 name_to_id[r["name"]] = r["id"]
+                id_to_name[r["id"]] = r["name"]
 
             for itm in data:
                 itm["DetectorName"] = name_to_id[itm["DetectorName"]]
@@ -606,6 +614,33 @@ class DataStore(object):
             # else:
             cur.executemany(sql, data_without_headers)
         self.con.commit()
+
+        # record the latest update time, per detector, if this is a table which needs this
+        # this information is used by self.get_update_time
+        if "DetectorName" in data[0].keys() and "Datetime" in data[0].keys():
+            # all of the detector names in this batch of input data - in string
+            # form rather than by ID
+            detector_names = set([id_to_name[itm["DetectorName"]] for itm in data])
+            for detector_name in detector_names:
+                # the key which the update time is indexed by
+                k = (self.data_file, table_name, detector_name)
+                detector_id = name_to_id[detector_name]
+                data_max_time = max(
+                    [
+                        itm["Datetime"]
+                        for itm in data
+                        if itm["DetectorName"] == detector_id
+                    ]
+                )
+                with self._update_time_lock:
+                    current_max_time = self._table_update_time.get(k, None)
+                    if current_max_time is None or data_max_time > current_max_time:
+                        self._table_update_time[k] = data_max_time
+                    else:
+                        if current_max_time is not None:
+                            _logger.warning(
+                                f"Duplicate data may have been sent to database, likely because of a programming error.  File: {self.data_file}, table: {table_name}."
+                            )
 
     def _get_table_names_from_disk(self, has_datetime=None):
         try:
@@ -688,6 +723,32 @@ class DataStore(object):
 
             TODO: (maybe) If there is not any time information in the table, fall back to returning
             the time of the last update in utc.
+        """
+        k = (self.data_file, table_name, detector_name)
+        with self._update_time_lock:
+            if k in self._table_update_time:
+                most_recent_time = self._table_update_time[k]
+            else:
+                most_recent_time = self.get_update_time_from_database(
+                    table_name, detector_name
+                )
+                self._table_update_time[k] = most_recent_time
+        return most_recent_time
+
+    def get_update_time_from_database(self, table_name, detector_name):
+
+        """Like "get_update_time" but don't use the cache, instead check the database
+
+        Parameters
+        ----------
+        table_name : str
+            Name of the data table
+
+        Returns
+        -------
+        datetime
+            Update time according to the timestamp of the most recent time record.
+            If the table has not yet been created, return None
         """
         t0 = datetime.datetime.now(datetime.timezone.utc)
         cur = self.con.cursor()
@@ -1019,7 +1080,7 @@ class DataStore(object):
                         rows = cur.execute(
                             f'select {db_column_names_sql} from {table_name} WHERE Datetime >= "{t0_query.strftime(DBTFMT)}" and Datetime < "{t1_query.strftime(DBTFMT)}"'
                         )
-                        print("TIMING1:", time.time() - a)
+                        # print("TIMING1:", time.time() - a)
                         a = time.time()
                         count = 0
                         sql = f"insert into {table_name} values ({','.join('?'*len(db_column_names))})"
@@ -1037,18 +1098,17 @@ class DataStore(object):
                             # this is the faster, but slightly more complex, version
                             while True:
                                 chunk = rows.fetchmany()
-                                print(len(chunk))
                                 if len(chunk) == 0:
                                     break
                                 count += len(chunk)
                                 con_archive.executemany(sql, chunk)
                             nrows = count
-                        print("TIMING2", time.time() - a)
+                        # print("TIMING2", time.time() - a)
                         a = time.time()
                         cur.execute(
                             f'delete from {table_name} WHERE Datetime >= "{t0_query.strftime(DBTFMT)}" and Datetime < "{t1_query.strftime(DBTFMT)}"'
                         )
-                        print("TIMING3", time.time() - a)
+                        # print("TIMING3", time.time() - a)
                         ### - note I intended to do this in chunks, but the first approach I took wasn't working (no order by compiled into my sqlite delete clause)
                         ### - just start by copying everything, and then change things if that is too slow.
                         # # old code - intended to copy in chunks
@@ -1298,7 +1358,6 @@ if __name__ == "__main__":
             format=logformat,
             datefmt="%Y-%m-%d %H:%M:%S",
         )
-
 
     setup_test_logging()
 
