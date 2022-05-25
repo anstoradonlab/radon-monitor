@@ -51,7 +51,7 @@ def get_html_page(list_of_fragments):
     <title>template table</title>
     <style scoped>
         .dataframe{
-            font-size:20px;
+            font-size:15px;
             font-family:Verdana, Geneva, Tahoma, sans-serif;
             border:none;
         }
@@ -70,7 +70,7 @@ def get_html_page(list_of_fragments):
             border:none;
         }
         .dataframe small {
-            font-size: 10px;
+            font-size: 8px;
         }
 
         .dataframe td {
@@ -82,7 +82,7 @@ def get_html_page(list_of_fragments):
             height: 20px;
             text-align: right;
             vertical-align: center;
-            font-size: 15px;
+            font-size: 12px;
 
         }
         .dataframe table {
@@ -94,15 +94,15 @@ def get_html_page(list_of_fragments):
             height: 60px;
             text-align: right;
             vertical-align: center;
-            font-size: 40px;
+            font-size: 30px;
 
         }
         .units td {
             width: 100px;
-            height: 20px;
+            height: 15px;
             text-align: right;
             vertical-align: center;
-            font-size: 15px;
+            font-size: 12px;
         }
 
         .instrument-name h1{
