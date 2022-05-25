@@ -52,7 +52,7 @@ def setup_logging(loglevel=logging.DEBUG, logfn=None):
     rootlogger.setLevel(loglevel)
     # logformat = "[%(asctime)s] %(levelname)s:%(name)s:%(message)s"
     log_format = "[%(levelname)1.1s %(asctime)s %(module)s:%(lineno)d %(threadName)s] %(message)s"
-    datefmt = "%Y-%m-%d %H:%M:%S"
+    datefmt = "%Y-%m-%d %H:%M:%S%z"
 
     # add a stream handler if non is present
     if len(rootlogger.handlers) == 0:
