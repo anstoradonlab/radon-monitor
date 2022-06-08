@@ -5,6 +5,7 @@ https://tech.preferred.jp/en/blog/working-with-configuration-in-python/
 
 import argparse
 import copy
+import configparser
 import datetime
 import logging
 import pathlib
@@ -299,6 +300,45 @@ def config_from_yamlfile(filename) -> Configuration:
         raw_cfg = yaml.safe_load(fd.read())
     config = parse_config(raw_cfg)
     return config
+
+def config_from_inifile(filename) -> Configuration:
+    """Read configuration from an ini file
+
+    Parameters
+    ----------
+    filename : path
+        filename, e.g. config.ini
+
+    Returns
+    -------
+    Configuration
+        Parsed configuration
+    
+    Note
+    ----
+
+    The ini file is assumed to have sections [data], [calbox], and
+    one or more [detector...] sections (e.g. [detector1], [detector2])
+
+    """
+    _logger.info(f"Loading configuration from: {filename}")
+    configp = configparser.ConfigParser()
+    configp.read(filename)
+    # load the detectors into an array of dicts
+    detectors_config = []
+    raw_cfg: typing.Dict[str, typing.Any] = {}
+    for section in configp.sections():
+        if section.startswith('detector'):
+            detectors_config.append( dict(configp[section]))
+        # config items under "data" are translated to top-level keys
+        elif section == "data":
+            raw_cfg.update(configp["data"])
+        else:
+            raw_cfg[section] = dict(configp[section])
+    raw_cfg['detectors'] = detectors_config
+    config = parse_config(raw_cfg)
+    return config
+        
 
 
 if __name__ == "__main__":
