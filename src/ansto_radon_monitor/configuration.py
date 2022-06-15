@@ -64,6 +64,9 @@ class DetectorConfig:
     serial_port: str = ""
     baudrate: int = 115200
     kind: str = ""
+    volume_m3: typing.Optional[float] = None
+    thoron_delay_volume_m3: typing.Optional[float] = None
+    thoron_delay_number_of_tanks: typing.Optional[float] = None
     datalogger_serial: int = -1
     csv_file_pattern: typing.Optional[str] = None
 
@@ -80,6 +83,7 @@ class CalUnitConfig:
     flush_duration_sec: int = 3600 * 12
     inject_duration_sec: int = 3600 * 6
     background_duration_sec: int = 3600 * 24
+    radon_source_activity_bq: typing.Optional[float] = None
 
 
 @dataclass
@@ -111,6 +115,7 @@ def parse_config(raw_cfg) -> Configuration:
         LogLevel: lambda x: LogLevel(logging._nameToLevel[x]),
         #        DetectorKind: parse_detector_kind,
         bool: str2bool,
+        float: float,
     }
 
     # create and validate the Configuration object
