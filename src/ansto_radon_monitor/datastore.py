@@ -4,6 +4,7 @@ import datetime
 import logging
 import os
 import pathlib
+import shutil
 import sqlite3
 import sys
 import threading
@@ -467,7 +468,7 @@ class DataStore(object):
             self._connection_per_thread[tid] = con
 
             if not self._readonly:
-                # improve write speed an concurrency (at the expense of extra files on disk)
+                # improve write speed and concurrency (at the expense of extra files on disk)
                 # https://www.sqlite.org/wal.html
                 con.execute("PRAGMA journal_mode=WAL")
                 con.execute("PRAGMA synchronous=NORMAL")
@@ -1025,12 +1026,84 @@ class DataStore(object):
         return fname_archive, con_archive
 
     def get_structure_sql(self, con):
+        """
+
+        """
         return [
             itm[0]
             for itm in con.execute(
                 "select sql from sqlite_master where sql is not NULL"
             ).fetchall()
         ]
+
+    def copy_database(self, fname_source, fname_dest):
+        """Make a copy of a database file, using the sqlite api so
+        that this works even if the file is open and being written
+        
+        Typically, fname_source would be self.data_file and fname_dest
+        would be something like 
+        
+        os.path.abspath(
+            os.path.join(self._config.data_dir, "archive", "radon-backup.db")
+        )
+
+        """
+        # write to a temp file first and then move as a final step
+        fname_temp = fname_dest + '.tmp'
+
+        try:
+            t0 = time.time()
+            # open a plain connection to the live database (no type conversions etc)
+            con = sqlite3.connect(
+                fname_source,
+            )
+
+            # open a connection to the new database (the destination a.k.a. backup database)
+            if os.path.exists(fname_temp):
+                os.unlink(fname_temp)
+            
+            con_dest = sqlite3.connect(fname_temp)
+
+            # copy structure from source to destination
+            with con_dest:
+                    for (sql,) in con.execute(
+                        "select sql from sqlite_master where sql is not NULL"
+                    ):
+                        _logger.debug(f"Executing sql: {sql}")
+                        con_dest.execute(sql)
+
+            # iterate over all tables and copy all rows
+            for table_name in self.tables:
+                db_column_names = [
+                    itm[1] for itm in con.execute(f"PRAGMA table_info({table_name})")
+                ]
+                db_column_names_sql = ",".join(db_column_names)
+                with con:
+                    cur = con.cursor()
+                    with con_dest:
+                        rows = cur.execute(
+                            f'select {db_column_names_sql} from {table_name}'
+                        )
+                        count = 0
+                        sql = f"insert into {table_name} values ({','.join('?'*len(db_column_names))})"
+                        cur_dest = con_dest.cursor()
+                        cur_dest.executemany(sql, (tuple(itm) for itm in rows))
+                        nrows = cur_dest.rowcount
+            
+            con.close()
+            con_dest.close()
+            # move the tmp file, replacing any existing backup
+            shutil.move(fname_temp, fname_dest)
+
+            t = time.time()
+            _logger.info(f"Finished backing up file {fname_source} to {fname_dest} in {t - t0} seconds")
+        finally:
+            if os.path.exists(fname_temp):
+                try:
+                    os.unlink(fname_temp)
+                except Exception as ex:
+                    _logger.error(f"Unable to delete temporary file: {fname_temp}")
+
 
     def archive_data(self, data_dir):
         """
@@ -1132,12 +1205,6 @@ class DataStore(object):
         """
         Backup the active database
         """
-        if not hasattr(self.con, "backup"):
-            _logger.warning(
-                "Backing up the live database requires Python version >= 3.7"
-            )
-        return
-
         if backup_fn is None:
             data_dir = self._config.data_dir
             archive_dir = os.path.join(data_dir, "archive")
@@ -1145,19 +1212,27 @@ class DataStore(object):
                 os.makedirs(archive_dir)
             backup_fn = os.path.join(archive_dir, "radon-backup.db")
 
-        def progress(status, remaining, total):
-            _logger.debug(
-                f"Database backup copied {total-remaining} of {total} pages..."
+        if not hasattr(self.con, "backup"):
+            _logger.warning(
+                "Using simple copy for backup (Sqlite backup needs Python version >= 3.7)"
             )
+            self.copy_database(self.data_file, backup_fn)
 
-        _logger.debug(f"Backing up datastore to {backup_fn}")
-        con = self.con
-        bck = sqlite3.connect(backup_fn)
-        with bck:
-            # copy in 10 Mb chunks, sleep for .25 seconds
-            # in between each call to copy
-            con.backup(bck, pages=1024 * 10, progress=progress, sleep=0.25)
-        bck.close()
+        else:
+            # use the official Sqlite backup procedure
+            def progress(status, remaining, total):
+                _logger.info(
+                    f"Database backup copied {total-remaining} of {total} pages..."
+                )
+
+            _logger.info(f"Backing up active database to {backup_fn}")
+            con = self.con
+            bck = sqlite3.connect(backup_fn)
+            with bck:
+                # copy in 10 Mb chunks, sleep for .25 seconds
+                # in between each call to copy
+                con.backup(bck, pages=1024 * 10, progress=progress, sleep=0.25)
+            bck.close()
 
     def sync_legacy_files(self, data_dir):
         """
