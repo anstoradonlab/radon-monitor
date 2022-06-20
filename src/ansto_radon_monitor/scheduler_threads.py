@@ -691,7 +691,7 @@ class CalibrationUnitThread(DataThread):
                 f"Unexpected number of scheduled background & calibration tasks ({n}) - the scheduler may be in an inconsistent state"
             )
         return n >= 2
-    
+
     @property
     def cal_running(self):
         """True if a calibration is currently underway"""
@@ -747,6 +747,7 @@ class DataLoggerThread(DataThread):
         self._last_time_check = datetime.datetime.min
         # buffer for last 30 minutes of 10-second (RTV) measurements
         self._rtv_buffer = collections.deque(maxlen=30 * 6)
+        self._fill_rtv_buffer()
 
         self._scheduler.enter(
             delay=0,
@@ -772,6 +773,30 @@ class DataLoggerThread(DataThread):
         )
         ser.port = detector_config.serial_port
         self._datalogger = CR1000(ser)
+
+    def _fill_rtv_buffer(self):
+        """
+        attempt to fill the rtv buffer from values in the database
+
+        This would be helpful if the user stops logging then re-starts
+        almost immediately
+        (perhaps after making a configuration change)
+        """
+        try:
+            table_name = "RTV"
+            if not table_name in self._datastore.tables:
+                return
+
+            halfhour = datetime.timedelta(minutes=30)
+            start_time = datetime.datetime.now(tz=datetime.timezone.utc) - halfhour
+            _, data = self._datastore.get_rows(table_name, start_time)
+            data = [itm for itm in data if itm["DetectorName"] == self.detectorName]
+            for itm in data:
+                self._rtv_buffer.append(itm)
+        except Exception as ex:
+            s = f"Error loading RTV from database (data display may show invalid data for the next 30 minutes): {ex} "
+            s += traceback.format_exc()
+            _logger.error(s)
 
     def shutdown_func(self):
         # the CR1000 finalizer (__del__) closes the port and
@@ -895,7 +920,7 @@ class DataLoggerThread(DataThread):
                             itm["DetectorName"] = self._config.name
                             if table_name == "RTV":
                                 self._rtv_buffer.append(itm)
-                        
+
                         self._datastore.add_records(destination_table_name, data)
 
         self.status["link"] = "connected"
@@ -1311,10 +1336,19 @@ class DataMinderThread(DataThread):
             user = c.user
             passwd = c.passwd
             directory = c.directory
-            if server is not None and user is not None and passwd is not None and directory is not None:
-                sync_folder_to_ftp(dirname_local=data_dir,
-                               server=server, user=user, passwd=passwd, dirname_remote=directory)
-            
+            if (
+                server is not None
+                and user is not None
+                and passwd is not None
+                and directory is not None
+            ):
+                sync_folder_to_ftp(
+                    dirname_local=data_dir,
+                    server=server,
+                    user=user,
+                    passwd=passwd,
+                    dirname_remote=directory,
+                )
 
     def sync_legacy_files(self, data_dir):
         with self._csv_output_lock:
@@ -1363,18 +1397,25 @@ class DataMinderThread(DataThread):
             self._tolerate_hang = True
 
 
-def sync_folder_to_ftp(dirname_local, server, user, passwd, dirname_remote, patterns_to_ignore = ['current', 'current/**', '.ftp-sync-marker']):
+def sync_folder_to_ftp(
+    dirname_local,
+    server,
+    user,
+    passwd,
+    dirname_remote,
+    patterns_to_ignore=["current", "current/**", ".ftp-sync-marker"],
+):
     """
     Recursively upload files from a local directory to a ftp server
 
     This is a stopgap until an alternative to ftp backups is found.  There
     are some known limitations:
      - the parent of dirname_remote, the remote directory, needs to exist
-     - a file is created in dirname_local, the loal directory, called 
+     - a file is created in dirname_local, the loal directory, called
        .ftp-sync-marker
        This is the only piece of information used to decide whether or not to
        upload files.  Any file which has a modification time newer than
-       .ftp-sync-marker is sent to the ftp server.  The contents of the 
+       .ftp-sync-marker is sent to the ftp server.  The contents of the
        server is not examined at all.
      - probably others exist too
 
@@ -1384,10 +1425,10 @@ def sync_folder_to_ftp(dirname_local, server, user, passwd, dirname_remote, patt
      don't upload files which match these patterns
      -- patterns are relative to dirname_local
     """
-    if not dirname_remote.startswith('/'):
-        dirname_remote = '/' + dirname_remote
-    
-    sync_ref = Path(dirname_local, '.ftp-sync-marker')
+    if not dirname_remote.startswith("/"):
+        dirname_remote = "/" + dirname_remote
+
+    sync_ref = Path(dirname_local, ".ftp-sync-marker")
     if sync_ref.exists():
         t0 = sync_ref.stat().st_mtime
     else:
@@ -1401,22 +1442,22 @@ def sync_folder_to_ftp(dirname_local, server, user, passwd, dirname_remote, patt
 
     # find out what needs to be uploaded
     uploads = []
-    for p in Path(dirname_local).rglob('*'):
+    for p in Path(dirname_local).rglob("*"):
         relp = p.relative_to(dirname_local)
         if p.stat().st_mtime > t0 and not matchany(relp):
             source = p
             dest_dir = Path(dirname_remote).joinpath(relp.parent).as_posix()
             dest_file = relp.parts[-1]
-            uploads.append( (source, dest_dir, dest_file) )
+            uploads.append((source, dest_dir, dest_file))
         else:
-            _logger.debug(f'Sync to FTP, skipping: {relp}')
-    
+            _logger.debug(f"Sync to FTP, skipping: {relp}")
+
     try:
         # use FTP to upload files
         with FTP(server) as ftp:
             ftp.login(user=user, passwd=passwd)
 
-            remote_cwd = '/'
+            remote_cwd = "/"
             ftp.cwd(remote_cwd)
             for source, dest_dir, dest_file in uploads:
                 # change dir on remote, only if needed, handle
@@ -1431,8 +1472,8 @@ def sync_folder_to_ftp(dirname_local, server, user, passwd, dirname_remote, patt
                     remote_cwd = dest_dir
                 # upload file or create dir
                 if source.is_file():
-                    _logger.info(f'Sync to FTP, uploading: {str(source)}')
-                    ftp.storbinary(f"STOR {dest_file}", source.open('rb'))
+                    _logger.info(f"Sync to FTP, uploading: {str(source)}")
+                    ftp.storbinary(f"STOR {dest_file}", source.open("rb"))
                 elif source.is_dir():
                     try:
                         ftp.mkd(dest_file)
@@ -1440,9 +1481,11 @@ def sync_folder_to_ftp(dirname_local, server, user, passwd, dirname_remote, patt
                         # likely that this folder already exists
                         pass
     except Exception as ex:
-        _logger.error(f"Failed to sync files to FTP server: {server}, user:{user}, "
-                      f"remote location: {dirname_remote} because of error: {ex}")
+        _logger.error(
+            f"Failed to sync files to FTP server: {server}, user:{user}, "
+            f"remote location: {dirname_remote} because of error: {ex}"
+        )
         return
-        
+
     # on success, update the sync marker
     sync_ref.touch()
