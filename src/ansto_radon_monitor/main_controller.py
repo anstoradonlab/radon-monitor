@@ -16,6 +16,8 @@ import threading
 import time
 import traceback
 
+import ansto_radon_monitor
+
 # don't use zeropc on windows because it causes firewall-related messages
 if os.name == "posix":
     import zerorpc
@@ -225,6 +227,7 @@ class MainController(object):
         # a flag used to signal that the controller is shutting down
         self._shutting_down = False
         self._configuration = configuration
+        logging.info(f"RDM version {ansto_radon_monitor.__version__}")
         try:
             self._start_threads()
             self.datastore.add_log_message("SystemEvent", "Startup")
@@ -454,3 +457,12 @@ class MainController(object):
     def cal_and_bg_is_scheduled(self):
         """return true if it looks like a bg and cal are scheduled"""
         return self._cal_system_task.cal_and_bg_is_scheduled()
+    
+    @property
+    def cal_running(self):
+        return self._cal_system_task.cal_running
+    
+    @property
+    def bg_running(self):
+        return self._cal_system_task.bg_running
+    

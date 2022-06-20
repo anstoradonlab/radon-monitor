@@ -110,7 +110,7 @@ def main(args):
         return
 
     if cmdline_args.action == "listlabjacks":
-        from labjack_interface import list_all_u12
+        from .labjack_interface import list_all_u12
 
         info = list_all_u12()
         # info: {'serialnumList': <u12.c_long_Array_127 object at 0x00E2AD50>,

@@ -687,6 +687,24 @@ class CalibrationUnitThread(DataThread):
                 f"Unexpected number of scheduled background & calibration tasks ({n}) - the scheduler may be in an inconsistent state"
             )
         return n >= 2
+    
+    @property
+    def cal_running(self):
+        """True if a calibration is currently underway"""
+        with self._lock:
+            for task in self._scheduler.queue:
+                if task.priority == self._calibration_tasks_priority:
+                    return True
+        return False
+
+    @property
+    def bg_running(self):
+        """True if a background is currently underway"""
+        with self._lock:
+            for task in self._scheduler.queue:
+                if task.priority == self._background_tasks_priority:
+                    return True
+        return False
 
 
 def fix_record(record: Dict):
