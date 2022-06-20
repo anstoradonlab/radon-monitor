@@ -2,15 +2,19 @@ import collections
 import copy
 import datetime
 import functools
+import ftplib
 import logging
 import math
 import pprint
+import pathlib
 import sched
 import sys
 import threading
 import time
 import traceback
 from typing import Dict
+from pathlib import Path
+from ftplib import FTP
 
 import numpy as np
 import serial
@@ -886,12 +890,14 @@ class DataLoggerThread(DataThread):
                         _logger.debug(msg)
                         self.status["link"] = msg
 
+                        data = [fix_record(itm) for itm in data]
                         for itm in data:
-                            itm = fix_record(itm)
                             itm["DetectorName"] = self._config.name
-                            self._datastore.add_record(destination_table_name, itm)
                             if table_name == "RTV":
                                 self._rtv_buffer.append(itm)
+                        
+                        self._datastore.add_records(destination_table_name, data)
+
         self.status["link"] = "connected"
 
         # include the clock check as part of the measurement function
@@ -1284,6 +1290,32 @@ class DataMinderThread(DataThread):
             _logger.debug(f"Archiving old records from active database")
             self._datastore.archive_data(data_dir=self._config.data_dir)
 
+    def upload_data(self):
+        """
+        Copy all data from config.data_dir to an ftp server, with the exception
+        of the active database files located in config.data_dir/current
+
+        see sync_folder_to_ftp for details
+        """
+        with self._backup_lock:
+            # Obtain file server information comes from the [ftp] section of
+            # config file
+            # [ftp]
+            # server=ftp.ansto.gov.au
+            # directory=
+            # username=XXX
+            # password=XXX
+            data_dir = self._config.data_dir
+            c = self._config.ftp
+            server = c.server
+            user = c.user
+            passwd = c.passwd
+            directory = c.directory
+            if server is not None and user is not None and passwd is not None and directory is not None:
+                sync_folder_to_ftp(dirname_local=data_dir,
+                               server=server, user=user, passwd=passwd, dirname_remote=directory)
+            
+
     def sync_legacy_files(self, data_dir):
         with self._csv_output_lock:
             _logger.debug("Writing data to legacy file format")
@@ -1305,6 +1337,7 @@ class DataMinderThread(DataThread):
         self.backup_active_database()
         t = datetime.datetime.now(datetime.timezone.utc)
         _logger.info(f"Database backup, archive, and legacy file export took {t-t0}")
+        self.upload_data()
 
         # re-schedule next backup
         next_backup = datetime.datetime.combine(t.date(), backup_time_of_day).replace(
@@ -1328,3 +1361,88 @@ class DataMinderThread(DataThread):
         self.update_heartbeat_time()
         with self._heartbeat_time_lock:
             self._tolerate_hang = True
+
+
+def sync_folder_to_ftp(dirname_local, server, user, passwd, dirname_remote, patterns_to_ignore = ['current', 'current/**', '.ftp-sync-marker']):
+    """
+    Recursively upload files from a local directory to a ftp server
+
+    This is a stopgap until an alternative to ftp backups is found.  There
+    are some known limitations:
+     - the parent of dirname_remote, the remote directory, needs to exist
+     - a file is created in dirname_local, the loal directory, called 
+       .ftp-sync-marker
+       This is the only piece of information used to decide whether or not to
+       upload files.  Any file which has a modification time newer than
+       .ftp-sync-marker is sent to the ftp server.  The contents of the 
+       server is not examined at all.
+     - probably others exist too
+
+    Arguments
+    =========
+    *patterns_to_ignore*
+     don't upload files which match these patterns
+     -- patterns are relative to dirname_local
+    """
+    if not dirname_remote.startswith('/'):
+        dirname_remote = '/' + dirname_remote
+    
+    sync_ref = Path(dirname_local, '.ftp-sync-marker')
+    if sync_ref.exists():
+        t0 = sync_ref.stat().st_mtime
+    else:
+        t0 = 0
+
+    def matchany(p):
+        for pattern in patterns_to_ignore:
+            if p.match(pattern):
+                return True
+        return False
+
+    # find out what needs to be uploaded
+    uploads = []
+    for p in Path(dirname_local).rglob('*'):
+        relp = p.relative_to(dirname_local)
+        if p.stat().st_mtime > t0 and not matchany(relp):
+            source = p
+            dest_dir = Path(dirname_remote).joinpath(relp.parent).as_posix()
+            dest_file = relp.parts[-1]
+            uploads.append( (source, dest_dir, dest_file) )
+        else:
+            _logger.debug(f'Sync to FTP, skipping: {relp}')
+    
+    try:
+        # use FTP to upload files
+        with FTP(server) as ftp:
+            ftp.login(user=user, passwd=passwd)
+
+            remote_cwd = '/'
+            ftp.cwd(remote_cwd)
+            for source, dest_dir, dest_file in uploads:
+                # change dir on remote, only if needed, handle
+                # creating dir if necessary
+                if not dest_dir == remote_cwd:
+                    try:
+                        ftp.cwd(dest_dir)
+                    except ftplib.error_perm:
+                        # TODO: handle multiple levels?
+                        ftp.mkd(dest_dir)
+                        ftp.cwd(dest_dir)
+                    remote_cwd = dest_dir
+                # upload file or create dir
+                if source.is_file():
+                    _logger.info(f'Sync to FTP, uploading: {str(source)}')
+                    ftp.storbinary(f"STOR {dest_file}", source.open('rb'))
+                elif source.is_dir():
+                    try:
+                        ftp.mkd(dest_file)
+                    except ftplib.error_perm:
+                        # likely that this folder already exists
+                        pass
+    except Exception as ex:
+        _logger.error(f"Failed to sync files to FTP server: {server}, user:{user}, "
+                      f"remote location: {dirname_remote} because of error: {ex}")
+        return
+        
+    # on success, update the sync marker
+    sync_ref.touch()

@@ -375,7 +375,7 @@ def column_definition(column_name):
     # Special columns - foreign key support
     if column_name in ["DetectorName"]:
         return (
-            "DetectorName integer, "
+            "DetectorName INTEGER, "
             "FOREIGN KEY(DetectorName) REFERENCES detector_names(id)"
         )
 
@@ -389,21 +389,21 @@ def column_definition(column_name):
         k = column_name
 
     known_cols = {
-        "Datetime": "timestamp",
-        "status": "text",
-        "comment": "text",
-        "RecNbr": "integer",
-        "ExFlow": "float",
-        "InFlow": "float",
-        "Gas_meter": "float",
-        "RelHum": "float",
-        "TankP": "float",
-        "Pres": "float",
-        "HV": "float",
-        "PanTemp": "float",
-        "BatV": "float",
-        "LLD": "integer",
-        "ULD": "integer",
+        "Datetime": "TEXT",
+        "status": "TEXT",
+        "comment": "TEXT",
+        "RecNbr": "INTEGER",
+        "ExFlow": "FLOAT",
+        "InFlow": "FLOAT",
+        "Gas_meter": "FLOAT",
+        "RelHum": "FLOAT",
+        "TankP": "FLOAT",
+        "Pres": "FLOAT",
+        "HV": "FLOAT",
+        "PanTemp": "FLOAT",
+        "BatV": "FLOAT",
+        "LLD": "INTEGER",
+        "ULD": "INTEGER",
     }
 
     if k in known_cols:
@@ -411,11 +411,11 @@ def column_definition(column_name):
 
     # handle multiple LLD/ULD columns (e.g. LLD1, LLD2, ...)
     elif column_name.startswith("LLD") or column_name.startswith("ULD"):
-        dtype = "integer"
+        dtype = "INTEGER"
     else:
         dtype = ""
 
-    return f"{column_name} dtype".strip()
+    return f"{column_name} {dtype}".strip()
 
 
 class DataStore(object):
@@ -616,8 +616,8 @@ class DataStore(object):
             cur.executemany(sql, data_without_headers)
         self.con.commit()
 
-        # record the latest update time, per detector, if this is a table which needs this
-        # this information is used by self.get_update_time
+        # record the latest update time, per detector, if this is a table which
+        # is used with self.get_update_time
         if "DetectorName" in data[0].keys() and "Datetime" in data[0].keys():
             # all of the detector names in this batch of input data - in string
             # form rather than by ID
@@ -833,6 +833,9 @@ class DataStore(object):
 
         TODO: doc fully
         [done] TODO: the 'start_time' should be replaced or augmented with a rowid
+        TODO: experiment with simplifying this by making a switch to using an index on the datetime column
+         - but then delete the index when backing up/archiving data files
+         (this gets us speed, simplicity, and compact file sizes)
         """
         if table_name is None:
             import traceback

@@ -85,6 +85,15 @@ class CalUnitConfig:
     background_duration_sec: int = 3600 * 24
     radon_source_activity_bq: typing.Optional[float] = None
 
+@dataclass
+class FtpConfig:
+    """
+    FTP backup configuration
+    """
+    server: typing.Optional[str] = None
+    user: typing.Optional[str] = None
+    passwd: typing.Optional[str] = None
+    directory: typing.Optional[str] = None
 
 @dataclass
 class Configuration:
@@ -101,6 +110,7 @@ class Configuration:
     legacy_file_timezone: float = 0
     detectors: typing.List[DetectorConfig] = field(default_factory=list)
     calbox: CalUnitConfig = CalUnitConfig()
+    ftp: FtpConfig = FtpConfig()
 
     def as_text(self):
         return pprint.pformat(self)
