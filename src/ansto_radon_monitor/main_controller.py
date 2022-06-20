@@ -457,3 +457,12 @@ class MainController(object):
     def cal_and_bg_is_scheduled(self):
         """return true if it looks like a bg and cal are scheduled"""
         return self._cal_system_task.cal_and_bg_is_scheduled()
+    
+    @property
+    def cal_running(self):
+        return self._cal_system_task.cal_running
+    
+    @property
+    def bg_running(self):
+        return self._cal_system_task.bg_running
+    
