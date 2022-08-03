@@ -1,4 +1,3 @@
-Detector: BareDatalogger, 
 'It is intended to log the output of an ANSTO dual flow loop, two filter radon
 'detector using a CR800 logger.
 'Last modified: Scott Chambers, Feb-2007
