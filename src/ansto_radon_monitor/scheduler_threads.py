@@ -353,7 +353,7 @@ class CalibrationUnitThread(DataThread):
             func()
         except Exception as ex:
             _logger.error(
-                "Unable to {description} "
+                f"Unable to {description} "
                 f" because of error: {ex}.  Attempting to reconnect and reset in 10sec."
             )
             self._schedule_connection(self._init_labjack_id, self._init_serialNumber)
