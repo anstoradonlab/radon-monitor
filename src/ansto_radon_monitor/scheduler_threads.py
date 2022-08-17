@@ -12,6 +12,7 @@ import sys
 import threading
 import time
 import traceback
+import typing
 from ftplib import FTP
 from pathlib import Path
 from typing import Dict
@@ -124,7 +125,6 @@ class DataThread(threading.Thread):
         self._tick_interval = 0.1
         self.measurement_interval = measurement_interval  # TODO: from config
         self.measurement_offset = measurement_offset
-        self._done = False
         self._last_measurement_time = 0
         self._scheduler = sched.scheduler(time.time, time.sleep)
         self._lock = threading.RLock()
@@ -147,10 +147,6 @@ class DataThread(threading.Thread):
     def shutdown(self):
         self.cancelled = True
         self.state_changed.set()
-
-    @property
-    def done(self):
-        return _done
 
     def update_heartbeat_time(self):
         with self._heartbeat_time_lock:
@@ -500,7 +496,9 @@ class CalibrationUnitThread(DataThread):
             #
             # begin flushing
             self._scheduler.enter(
-                delay=initial_delay_seconds, priority=p, action=self.set_flush_state,
+                delay=initial_delay_seconds,
+                priority=p,
+                action=self.set_flush_state,
             )
             # start calibration *on* the half hour
             #### --- commented out, assume that the calling code will
@@ -538,7 +536,9 @@ class CalibrationUnitThread(DataThread):
             info_message = f"Expecting to stop injecting radon ({self._detector_names[detector_idx]}) at: {approx_tstr(datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=delay_inject_stop))}"
             _logger.info(info_message)
             self._scheduler.enter(
-                delay=delay_inject_stop, priority=p, action=self.set_default_state,
+                delay=delay_inject_stop,
+                priority=p,
+                action=self.set_default_state,
             )
 
             self.state_changed.set()
@@ -610,7 +610,9 @@ class CalibrationUnitThread(DataThread):
             self._cancel_tasks(self._schedule_a_cal_tasks_priority)
             # schedule a task to reset the cal box
             self._scheduler.enter(
-                delay=0, priority=0, action=self.set_noncalibration_state,
+                delay=0,
+                priority=0,
+                action=self.set_noncalibration_state,
             )
             self.state_changed.set()
 
@@ -726,7 +728,9 @@ class CalibrationUnitThread(DataThread):
             self._cancel_tasks(self._schedule_a_bg_tasks_priority)
             # schedule a task to reset the cal box
             self._scheduler.enter(
-                delay=0, priority=0, action=self.set_nonbackground_state,
+                delay=0,
+                priority=0,
+                action=self.set_nonbackground_state,
             )
             self.state_changed.set()
 

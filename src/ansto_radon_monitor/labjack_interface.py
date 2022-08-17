@@ -90,7 +90,7 @@ class LabjackWrapper:
             stateIO = 0
             stateD = bool_list_to_int(state)
             # trisD 1-valued bits to signal digital output
-            all_high = 2 ** 16 - 1
+            all_high = 2**16 - 1
             d.digitalIO(
                 trisD=all_high,
                 stateD=stateD,
@@ -118,10 +118,10 @@ class LabjackWrapper:
         # eDigitalOut doesn't work on Windows, so use the low-level commands
         if os.name == "nt":
             # there are 16 DIO channels, here is a bit flag of 16 1s
-            all_high = 2 ** 16 - 1
+            all_high = 2**16 - 1
             d.digitalIO(trisD=all_high, stateD=0, updateDigital=1, trisIO=0, stateIO=0)
         else:
-            all_high_byte = 2 ** 8 - 1
+            all_high_byte = 2**8 - 1
             # Args:
             # D15toD8Directions, A byte where 0 = Output, 1 = Input for D15-8
             # D7toD0Directions, A byte where 0 = Output, 1 = Input for D7-0
@@ -155,7 +155,9 @@ class LabjackWrapper:
         _logger.debug(f"Reading DIO states")
         d = self.device
         if os.name == "nt":
-            status = d.digitalIO(updateDigital=0,)
+            status = d.digitalIO(
+                updateDigital=0,
+            )
             direction = int_to_bool_list(status["trisD"], 16)
             level = int_to_bool_list(status["stateD"], 16)
         else:
