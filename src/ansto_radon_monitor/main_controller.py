@@ -244,7 +244,7 @@ class MainController(object):
 
         # calibration unit
         self._cal_system_task = CalibrationUnitThread(
-            self._configuration.calbox, datastore=self.datastore
+            self._configuration, datastore=self.datastore
         )
         with self._thread_list_lock:
             self._threads.append(self._cal_system_task)
@@ -392,13 +392,18 @@ class MainController(object):
             # itm_summary = ','.join([
             #        f'{itmkey}: {str(itmvalue)}' for itmkey,itmvalue in zip(status[k]['status'].items())
             #    ])
-            itm_summary = str(status[k]["status"])
+            itm_summary = (
+                str(status[k]["status"])
+                .replace("{", "")
+                .replace("}", "")
+                .replace("'", "")
+            )
             summary_list.append(f"{k}   {itm_summary}")
 
         summary_cal = f"Calibration Unit    {status['CalibrationUnitThread']['status']['message']}"
         summary_list.append(summary_cal)
 
-        status["summary"] = "    ".join(summary_list)
+        status["summary"] = " | ".join(summary_list)
         return status
 
     def get_job_queue(self):
@@ -424,15 +429,20 @@ class MainController(object):
         self,
         flush_duration=10 * 3600,
         inject_duration=5 * 3600,
-        radon_detector=0,
         start_time=None,
+        detector_idx=0,
     ):
         self._cal_system_task.run_calibration(
-            flush_duration, inject_duration, start_time=start_time
+            flush_duration,
+            inject_duration,
+            start_time=start_time,
+            detector_idx=detector_idx,
         )
 
-    def run_background(self, duration=12 * 3600, start_time=None):
-        self._cal_system_task.run_background(duration, start_time=start_time)
+    def run_background(self, duration=12 * 3600, start_time=None, detector_idx=0):
+        self._cal_system_task.run_background(
+            duration, start_time=start_time, detector_idx=detector_idx
+        )
 
     def stop_calibration(self):
         self._cal_system_task.cancel_calibration()
@@ -441,28 +451,27 @@ class MainController(object):
         self._cal_system_task.cancel_background()
 
     def schedule_recurring_calibration(
-        self, flush_duration, inject_duration, t0_cal, cal_interval
+        self, flush_duration, inject_duration, t0_cal, cal_interval, detector_idx=0,
     ):
         self._cal_system_task.schedule_recurring_calibration(
-            flush_duration, inject_duration, t0_cal, cal_interval
+            flush_duration, inject_duration, t0_cal, cal_interval, detector_idx,
         )
 
     def schedule_recurring_background(
-        self, duration, t0_background, background_interval
+        self, duration, t0_background, background_interval, detector_idx=0,
     ):
         self._cal_system_task.schedule_recurring_background(
-            duration, t0_background, background_interval
+            duration, t0_background, background_interval, detector_idx,
         )
 
     def cal_and_bg_is_scheduled(self):
         """return true if it looks like a bg and cal are scheduled"""
         return self._cal_system_task.cal_and_bg_is_scheduled()
-    
+
     @property
     def cal_running(self):
         return self._cal_system_task.cal_running
-    
+
     @property
     def bg_running(self):
         return self._cal_system_task.bg_running
-    

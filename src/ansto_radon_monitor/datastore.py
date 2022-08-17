@@ -537,12 +537,14 @@ class DataStore(object):
             self.con.execute(sql)
         self.con.commit()
 
-    def add_log_message(self, event_type, event_text):
+    def add_log_message(self, event_type, event_text, detector_name=None):
         table_name = "LogMessages"
         t = datetime.datetime.now(datetime.timezone.utc)
         # floor to nearest second
         t = datetime.datetime(*t.timetuple()[:6], tzinfo=t.tzinfo)
         data = {"Datetime": t, "EventType": event_type, "EventData": event_text}
+        if detector_name is not None:
+            data["Detector"] = detector_name
         self.add_record(table_name, data)
 
     def add_record(self, table_name, data):
@@ -605,8 +607,17 @@ class DataStore(object):
                 .lower()
                 .startswith(f"table {table_name.lower()} has no column named")
             ):
-                # new column(s) have somehow appeared in the table
-                self.modify_table(table_name, row0)
+                try:
+                    # new column(s) have somehow appeared in the table
+                    self.modify_table(table_name, row0)
+                except sqlite3.OperationalError as ex2:
+                    if ex2.args[0].startswith("duplicate column name:"):
+                        # another thread beat us and added the column name already
+                        # so we're ok to re-try writing the data to the db
+                        pass
+                    else:
+                        raise ex2
+
             else:
                 raise ex
 
@@ -1052,28 +1063,26 @@ class DataStore(object):
 
         """
         # write to a temp file first and then move as a final step
-        fname_temp = fname_dest + '.tmp'
+        fname_temp = fname_dest + ".tmp"
 
         try:
             t0 = time.time()
             # open a plain connection to the live database (no type conversions etc)
-            con = sqlite3.connect(
-                fname_source,
-            )
+            con = sqlite3.connect(fname_source,)
 
             # open a connection to the new database (the destination a.k.a. backup database)
             if os.path.exists(fname_temp):
                 os.unlink(fname_temp)
-            
+
             con_dest = sqlite3.connect(fname_temp)
 
             # copy structure from source to destination
             with con_dest:
-                    for (sql,) in con.execute(
-                        "select sql from sqlite_master where sql is not NULL"
-                    ):
-                        _logger.debug(f"Executing sql: {sql}")
-                        con_dest.execute(sql)
+                for (sql,) in con.execute(
+                    "select sql from sqlite_master where sql is not NULL"
+                ):
+                    _logger.debug(f"Executing sql: {sql}")
+                    con_dest.execute(sql)
 
             # iterate over all tables and copy all rows
             for table_name in self.tables:
@@ -1085,21 +1094,23 @@ class DataStore(object):
                     cur = con.cursor()
                     with con_dest:
                         rows = cur.execute(
-                            f'select {db_column_names_sql} from {table_name}'
+                            f"select {db_column_names_sql} from {table_name}"
                         )
                         count = 0
                         sql = f"insert into {table_name} values ({','.join('?'*len(db_column_names))})"
                         cur_dest = con_dest.cursor()
                         cur_dest.executemany(sql, (tuple(itm) for itm in rows))
                         nrows = cur_dest.rowcount
-            
+
             con.close()
             con_dest.close()
             # move the tmp file, replacing any existing backup
             shutil.move(fname_temp, fname_dest)
 
             t = time.time()
-            _logger.info(f"Finished backing up file {fname_source} to {fname_dest} in {t - t0} seconds")
+            _logger.info(
+                f"Finished backing up file {fname_source} to {fname_dest} in {t - t0} seconds"
+            )
         finally:
             if os.path.exists(fname_temp):
                 try:
@@ -1107,15 +1118,12 @@ class DataStore(object):
                 except Exception as ex:
                     _logger.error(f"Unable to delete temporary file: {fname_temp}")
 
-
     def archive_data(self, data_dir):
         """
         Move old data into archives
         """
         # open a plain connection to the live database (no type conversions etc)
-        con = sqlite3.connect(
-            self.data_file,
-        )
+        con = sqlite3.connect(self.data_file,)
 
         maximum_age = datetime.timedelta(days=35)
         threshold_time = datetime.datetime.now(datetime.timezone.utc) - maximum_age

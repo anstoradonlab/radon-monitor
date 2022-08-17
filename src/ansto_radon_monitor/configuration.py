@@ -4,8 +4,8 @@ https://tech.preferred.jp/en/blog/working-with-configuration-in-python/
 """
 
 import argparse
-import copy
 import configparser
+import copy
 import datetime
 import logging
 import pathlib
@@ -85,15 +85,18 @@ class CalUnitConfig:
     background_duration_sec: int = 3600 * 24
     radon_source_activity_bq: typing.Optional[float] = None
 
+
 @dataclass
 class FtpConfig:
     """
     FTP backup configuration
     """
+
     server: typing.Optional[str] = None
     user: typing.Optional[str] = None
     passwd: typing.Optional[str] = None
     directory: typing.Optional[str] = None
+
 
 @dataclass
 class Configuration:
@@ -296,13 +299,15 @@ def config_from_commandline(
 
     # check log file is writable
     if config.logfile is None:
-        config.logfile = config.data_dir.joinpath('radon_monitor_messages.log')
+        config.logfile = config.data_dir.joinpath("radon_monitor_messages.log")
     try:
-        with open(config.logfile, 'at') as fd:
+        with open(config.logfile, "at") as fd:
             pass
     except:
-        _logger.error(f"Unable to open log file for writing, log messages will"
-                    f" not be saved.  Filename: {config.logfile}")
+        _logger.error(
+            f"Unable to open log file for writing, log messages will"
+            f" not be saved.  Filename: {config.logfile}"
+        )
         config.logfile = None
     _logger.debug(f"Configuration parsed: {config}")
 
@@ -315,6 +320,7 @@ def config_from_yamlfile(filename) -> Configuration:
         raw_cfg = yaml.safe_load(fd.read())
     config = parse_config(raw_cfg)
     return config
+
 
 def config_from_inifile(filename) -> Configuration:
     """Read configuration from an ini file
@@ -343,17 +349,16 @@ def config_from_inifile(filename) -> Configuration:
     detectors_config = []
     raw_cfg: typing.Dict[str, typing.Any] = {}
     for section in configp.sections():
-        if section.startswith('detector'):
-            detectors_config.append( dict(configp[section]))
+        if section.startswith("detector"):
+            detectors_config.append(dict(configp[section]))
         # config items under "data" are translated to top-level keys
         elif section == "data":
             raw_cfg.update(configp["data"])
         else:
             raw_cfg[section] = dict(configp[section])
-    raw_cfg['detectors'] = detectors_config
+    raw_cfg["detectors"] = detectors_config
     config = parse_config(raw_cfg)
     return config
-        
 
 
 if __name__ == "__main__":

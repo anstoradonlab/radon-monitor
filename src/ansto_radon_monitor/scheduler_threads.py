@@ -1,20 +1,20 @@
 import collections
 import copy
 import datetime
-import functools
 import ftplib
+import functools
 import logging
 import math
-import pprint
 import pathlib
+import pprint
 import sched
 import sys
 import threading
 import time
 import traceback
-from typing import Dict
-from pathlib import Path
 from ftplib import FTP
+from pathlib import Path
+from typing import Dict
 
 import numpy as np
 import serial
@@ -27,7 +27,7 @@ from ansto_radon_monitor.html import status_as_html
 
 _logger = logging.getLogger()
 
-from .labjack_interface import CalBoxLabjack
+from .labjack_interface import CalBoxLabjack, CapeGrimLabjack
 
 
 def log_backtrace_all_threads():
@@ -37,6 +37,19 @@ def log_backtrace_all_threads():
         msg = "".join(traceback.format_stack(sys._current_frames()[th.ident]))
         _logger.error(f"{msg}")
         # print(f"{msg}", file=sys.stderr)
+
+
+def approx_tstr(t: datetime.datetime):
+    """Return an approximate (truncated to minutes) text representation
+       of a datetime.datetime
+
+    Parameters
+    ----------
+    t : datetime.datetime
+        the time to show
+    """
+    tfmt = "%Y-%m-%d %H:%M%Z"
+    return t.strftime(tfmt)
 
 
 def task_description(description_text):
@@ -264,8 +277,8 @@ class DataThread(threading.Thread):
 class CalibrationUnitThread(DataThread):
     def __init__(self, config, datastore, *args, **kwargs):
 
-        labjack_id = config.labjack_id
-        serialNumber = config.labjack_serial
+        labjack_id = config.calbox.labjack_id
+        serialNumber = config.calbox.labjack_serial
 
         # Labjack API needs None for serialNumber if we are to ignore it
         if serialNumber == -1:
@@ -282,6 +295,9 @@ class CalibrationUnitThread(DataThread):
         self.name = "CalibrationUnitThread"
         self._labjack = None
         self._data_table_name = "CalibrationUnit"
+        self._kind = config.calbox.kind
+        self._num_detectors = len(config.detectors)
+        self._detector_names = [itm.name for itm in config.detectors]
 
         # lower numbers are higher priority
         # task priority is *also* used to identify tasks later, so that
@@ -294,7 +310,7 @@ class CalibrationUnitThread(DataThread):
         self._connection_task_priority = -1000
 
         # this special value of labjack_id tells the comms routines not to connect
-        if config.kind == "mock":
+        if config.calbox.kind == "mock":
             labjack_id = None
 
         self._schedule_connection(labjack_id, serialNumber)
@@ -325,7 +341,24 @@ class CalibrationUnitThread(DataThread):
     def connect_to_labjack(self, labjack_id, serialNumber):
         with self._lock:
             try:
-                self._labjack = CalBoxLabjack(labjack_id, serialNumber=serialNumber)
+                if self._kind == "mock":
+                    self._labjack = CalBoxLabjack(
+                        labjack_id=None, serialNumber=serialNumber
+                    )
+                elif self._kind == "generic":
+                    self._labjack = CalBoxLabjack(labjack_id, serialNumber=serialNumber)
+                elif self._kind == "CapeGrim":
+                    self._labjack = CapeGrimLabjack(
+                        labjack_id, serialNumber=serialNumber
+                    )
+                elif self._kind == "mockCapeGrim":
+                    self._labjack = CapeGrimLabjack(
+                        labjack_id=None, serialNumber=serialNumber
+                    )
+                else:
+                    _logger.error(
+                        f"Unknown kind of calibration unit: {self._config.kind}.  Known kinds are: ['generic', 'CapeGrim', 'mock', 'mockCapeGrim]"
+                    )
             except Exception as ex:
                 _logger.error(
                     "Unable to connect to calibration system LabJack using "
@@ -347,10 +380,10 @@ class CalibrationUnitThread(DataThread):
             )
             self._schedule_connection(self._init_labjack_id, self._init_serialNumber)
 
-    def _run_or_reset(self, func, description):
+    def _run_or_reset(self, func, description, argument=()):
         """Run a function, but on failure log the exception and attempt to reconnect to the logger"""
         try:
-            func()
+            func(*argument)
         except Exception as ex:
             _logger.error(
                 f"Unable to {description} "
@@ -359,20 +392,28 @@ class CalibrationUnitThread(DataThread):
             self._schedule_connection(self._init_labjack_id, self._init_serialNumber)
 
     @task_description("Calibration unit: inject from source")
-    def set_inject_state(self):
+    def set_inject_state(self, detector_idx=0):
         self._datastore.add_log_message(
-            "CalibrationEvent", f"Began injecting radon from calibration source"
+            "CalibrationEvent",
+            f"Began injecting radon from calibration source into detector {detector_idx+1}",
+            detector_name=self._detector_names[detector_idx],
         )
-        # cancel background - so that we are not injecting
-        # while flow is turned off (which would lead to a very
-        # high radon concentration in the detector)
-        self._labjack.reset_background()
-        self._run_or_reset(self._labjack.inject, "begin source injection")
+        self._run_or_reset(
+            self._labjack.inject, "begin source injection", argument=(detector_idx,)
+        )
 
     @task_description("Calibration unit: switch to background state")
-    def set_background_state(self):
-        self._datastore.add_log_message("CalibrationEvent", f"Began background cycle")
-        self._run_or_reset(self._labjack.start_background, "enter background state")
+    def set_background_state(self, detector_idx=0):
+        self._datastore.add_log_message(
+            "CalibrationEvent",
+            f"Began background cycle on detector {detector_idx}",
+            detector_name=self._detector_names[detector_idx],
+        )
+        self._run_or_reset(
+            self._labjack.start_background,
+            "enter background state",
+            argument=(detector_idx,),
+        )
 
     @task_description("Calibration unit: return to idle")
     def set_default_state(self):
@@ -414,7 +455,9 @@ class CalibrationUnitThread(DataThread):
                 action=self.run_measurement,
             )
 
-    def run_calibration(self, flush_duration, inject_duration, start_time=None):
+    def run_calibration(
+        self, flush_duration, inject_duration, start_time=None, detector_idx=0
+    ):
         """Run the calibration sequence - flush source, inject source
 
         Parameters
@@ -426,16 +469,22 @@ class CalibrationUnitThread(DataThread):
         start_time : datetime.datetie or None, optional
             time when flushing is due to start (UTC), or None (which means to start
             immediately), by default None
+        detector_idx : int, default 0
+            The detector index to target (always 0 for a one-detector setup)
         """
         with self._lock:
             log_start_time = start_time if start_time is not None else "now"
             info_message = (
                 f"Calibration scheduled, start_time: {log_start_time}, "
                 f"flush_duration:{flush_duration}, "
-                f"inject_duration:{inject_duration}"
+                f"inject_duration:{inject_duration}, detector: {detector_idx+1}"
             )
             _logger.info(info_message)
-            self._datastore.add_log_message("CalibrationEvent", info_message)
+            self._datastore.add_log_message(
+                "CalibrationEvent",
+                info_message,
+                detector_name=self._detector_names[detector_idx],
+            )
 
             p = self._calibration_tasks_priority
             if start_time is not None:
@@ -451,9 +500,7 @@ class CalibrationUnitThread(DataThread):
             #
             # begin flushing
             self._scheduler.enter(
-                delay=initial_delay_seconds,
-                priority=p,
-                action=self.set_flush_state,
+                delay=initial_delay_seconds, priority=p, action=self.set_flush_state,
             )
             # start calibration *on* the half hour
             #### --- commented out, assume that the calling code will
@@ -477,27 +524,31 @@ class CalibrationUnitThread(DataThread):
                 delay_inject_start = flush_duration + initial_delay_seconds
 
             # start injection
-            info_message = f"Expecting to start injecting radon at: {datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=delay_inject_start)}"
+            info_message = f"Expecting to start injecting radon ({self._detector_names[detector_idx]}) at: {approx_tstr(datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=delay_inject_start))}"
             _logger.info(info_message)
             self._scheduler.enter(
                 delay=delay_inject_start,
                 priority=p,
                 action=self.set_inject_state,
+                argument=(detector_idx,),
             )
 
             # stop injection
             delay_inject_stop = delay_inject_start + inject_duration
-            info_message = f"Expecting to stop injecting radon at: {datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=delay_inject_stop)}"
+            info_message = f"Expecting to stop injecting radon ({self._detector_names[detector_idx]}) at: {approx_tstr(datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=delay_inject_stop))}"
             _logger.info(info_message)
             self._scheduler.enter(
-                delay=delay_inject_stop,
-                priority=p,
-                action=self.set_default_state,
+                delay=delay_inject_stop, priority=p, action=self.set_default_state,
             )
 
             self.state_changed.set()
 
-    def run_background(self, duration, start_time=None):
+    def run_background(
+        self,
+        duration: float,
+        start_time: datetime.datetime = None,
+        detector_idx: int = 0,
+    ):
         """Run the calibration sequence - flush source, inject source
 
         Parameters
@@ -507,12 +558,15 @@ class CalibrationUnitThread(DataThread):
         start_time : datetime.datetime or None, optional
             time when flushing is due to start (UTC), or None (which means to start
             immediately), by default None
+        detector_idx : int
+            which detector to run the background on (an index, starting from 0)
         """
         with self._lock:
             log_start_time = start_time if start_time is not None else "now"
             self._datastore.add_log_message(
                 "CalibrationEvent",
-                f"Background scheduled, start time: {log_start_time}, duration: {duration}",
+                f"Background scheduled, start time: {log_start_time}, duration: {duration}, detector: {detector_idx+1}",
+                detector_name=self._detector_names[detector_idx],
             )
             p = self._background_tasks_priority
             if start_time is not None:
@@ -526,15 +580,16 @@ class CalibrationUnitThread(DataThread):
                 initial_delay_seconds = 0
             #
             # begin background
-            info_message = f"Expecting to start background at: {datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=initial_delay_seconds)}"
+            info_message = f"Expecting to start background ({self._detector_names[detector_idx]}) at: {approx_tstr(datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=initial_delay_seconds))}"
             _logger.info(info_message)
             self._scheduler.enter(
                 delay=initial_delay_seconds,
                 priority=p,
                 action=self.set_background_state,
+                argument=(detector_idx,),
             )
             # reset the background flags
-            info_message = f"Expecting to stop background at: {datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=initial_delay_seconds + duration)}"
+            info_message = f"Expecting to stop background ({self._detector_names[detector_idx]}) at: {approx_tstr(datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=initial_delay_seconds + duration))}"
             _logger.info(info_message)
             self._scheduler.enter(
                 delay=initial_delay_seconds + duration,
@@ -549,15 +604,13 @@ class CalibrationUnitThread(DataThread):
         """cancel an in-progress calibration and all pending ones"""
         with self._lock:
             self._datastore.add_log_message(
-                "CalibrationEvent", f"Cancelling any pending background cycles"
+                "CalibrationEvent", f"Cancelling calibration cycle"
             )
             self._cancel_tasks(self._calibration_tasks_priority)
             self._cancel_tasks(self._schedule_a_cal_tasks_priority)
             # schedule a task to reset the cal box
             self._scheduler.enter(
-                delay=0,
-                priority=0,
-                action=self.set_noncalibration_state,
+                delay=0, priority=0, action=self.set_noncalibration_state,
             )
             self.state_changed.set()
 
@@ -568,6 +621,7 @@ class CalibrationUnitThread(DataThread):
         inject_duration: float,
         first_start_time: datetime.datetime,
         interval: datetime.timedelta,
+        detector_idx: int = 0,
     ):
         with self._lock:
             # ensure first_start_time is in the future
@@ -584,10 +638,13 @@ class CalibrationUnitThread(DataThread):
                     )
                     return
             self.run_calibration(
-                flush_duration, inject_duration, start_time=first_start_time
+                flush_duration,
+                inject_duration,
+                start_time=first_start_time,
+                detector_idx=detector_idx,
             )
             _logger.info(
-                f"Next scheduled calibration (flush: {flush_duration/3600.0}, inject: {inject_duration/3600.} hours) scheduled for {first_start_time} UTC."
+                f"Next scheduled calibration (detector {detector_idx+1}, flush: {flush_duration/3600.0}, inject: {inject_duration/3600.} hours) scheduled for {first_start_time} UTC."
             )
 
             # After the next calibration has completed, schedule the next one
@@ -604,7 +661,13 @@ class CalibrationUnitThread(DataThread):
                 delay=scheduler_delay_seconds,
                 priority=self._schedule_a_cal_tasks_priority,
                 action=self.schedule_recurring_calibration,
-                argument=(flush_duration, inject_duration, first_start_time, interval),
+                argument=(
+                    flush_duration,
+                    inject_duration,
+                    first_start_time,
+                    interval,
+                    detector_idx,
+                ),
             )
 
     @task_description("Calibration unit: schedule recurring background")
@@ -613,6 +676,7 @@ class CalibrationUnitThread(DataThread):
         duration: float,
         first_start_time: datetime.datetime,
         interval: datetime.timedelta,
+        detector_idx: int = 0,
     ):
         with self._lock:
             # ensure first_start_time is in the future
@@ -629,7 +693,9 @@ class CalibrationUnitThread(DataThread):
                     )
                     return
 
-            self.run_background(duration, start_time=first_start_time)
+            self.run_background(
+                duration, start_time=first_start_time, detector_idx=detector_idx
+            )
             _logger.info(
                 f"Next scheduled background ({duration/3600.0} hours) scheduled for {first_start_time} UTC."
             )
@@ -646,7 +712,7 @@ class CalibrationUnitThread(DataThread):
                 delay=scheduler_delay_seconds,
                 priority=self._schedule_a_bg_tasks_priority,
                 action=self.schedule_recurring_background,
-                argument=(duration, first_start_time, interval),
+                argument=(duration, first_start_time, interval, detector_idx),
             )
 
     @task_description("Calibration unit: cancel background")
@@ -660,9 +726,7 @@ class CalibrationUnitThread(DataThread):
             self._cancel_tasks(self._schedule_a_bg_tasks_priority)
             # schedule a task to reset the cal box
             self._scheduler.enter(
-                delay=0,
-                priority=0,
-                action=self.set_nonbackground_state,
+                delay=0, priority=0, action=self.set_nonbackground_state,
             )
             self.state_changed.set()
 
@@ -686,11 +750,12 @@ class CalibrationUnitThread(DataThread):
                 or itm.priority == self._schedule_a_cal_tasks_priority
             ]
         n = len(scheduled_cal_bg_tasks)
-        if n == 1 or n > 2:
+        expected_num_tasks = self._num_detectors * 2
+        if not n == expected_num_tasks:
             _logger.warning(
-                f"Unexpected number of scheduled background & calibration tasks ({n}) - the scheduler may be in an inconsistent state"
+                f"Unexpected number of scheduled background & calibration tasks ({n}, expected {expected_num_tasks}) - the scheduler may be in an inconsistent state"
             )
-        return n >= 2
+        return n >= expected_num_tasks
 
     @property
     def cal_running(self):
@@ -1003,12 +1068,14 @@ class DataLoggerThread(DataThread):
         self._datastore.add_log_message(
             "LoggerStatusCheck",
             f"Detector: {self.detectorName}, {pprint.pformat(progstat)}",
+            detector_name=self.detectorName,
         )
-        # TODO: work out which file is running from progstat
         fname = str(progstat["ProgName"], "utf-8")
         data_file = str(self._datalogger.getfile(fname), "utf-8")
         self._datastore.add_log_message(
-            "LoggerFirmware", f"Detector: {self.detectorName}, \n{data_file}"
+            "LoggerFirmware",
+            f"Detector: {self.detectorName}, \n{data_file}",
+            detector_name=self.detectorName,
         )
 
     def get_clock_offset(self):
@@ -1074,6 +1141,7 @@ class DataLoggerThread(DataThread):
         self._datastore.add_log_message(
             "ClockCheck",
             f"Computer synced with network time: {ntp_sync_ok}, time difference (datalogger minus computer): {clock_offset}, detector: {self.detectorName}",
+            detector_name=self.detectorName,
         )
         if (
             maximum_time_difference_seconds is not None
@@ -1096,6 +1164,7 @@ class DataLoggerThread(DataThread):
             self._datastore.add_log_message(
                 "ClockCheck",
                 f"Synchronised datalogger clock with computer clock, time difference (datalogger minus computer): {clock_offset}, detector: {self.detectorName}",
+                detector_name=self.detectorName,
             )
 
 

@@ -155,9 +155,7 @@ class LabjackWrapper:
         _logger.debug(f"Reading DIO states")
         d = self.device
         if os.name == "nt":
-            status = d.digitalIO(
-                updateDigital=0,
-            )
+            status = d.digitalIO(updateDigital=0,)
             direction = int_to_bool_list(status["trisD"], 16)
             level = int_to_bool_list(status["stateD"], 16)
         else:
@@ -328,12 +326,13 @@ class CalBoxLabjack:
         _logger.info(f"Cal Box flush")
         self._send_state_to_device()
 
-    def inject(self):
+    def inject(self, detector_idx=0):
         """Inject radon from source"""
         if self.digital_output_state["DisableInternalBlower"] == True:
             _logger.warning(
                 "Switching directly from background to inject: background may have been terminated early."
             )
+        assert detector_idx == 0
         self.digital_output_state["ActivatePump"] = True
         self.digital_output_state["ActivateInject"] = True
         self.digital_output_state["ActivateCutoffValve"] = False
@@ -350,8 +349,9 @@ class CalBoxLabjack:
         _logger.info(f"Cal Box flush and injection state reset")
         self._send_state_to_device()
 
-    def start_background(self):
+    def start_background(self, detector_idx=0):
         """Put detector in background mode"""
+        assert detector_idx == 0
         if self.digital_output_state["ActivateInject"] == True:
             _logger.warning(
                 "Switching directly from inject to background: a surprisingly high background is likely."
@@ -435,6 +435,190 @@ class CalBoxLabjack:
             s = "Flushing source and performing background"
         else:
             s = "Unexpected DIO state: {flags}"
+        status = {}
+        status["message"] = s
+        status["digital out"] = {}
+        status["analogue in"] = {}
+        status["analogue in"].update(self.analogue_states)
+        status["digital out"].update(self.digital_output_state)
+        status["serial"] = self.serial_number
+        return status
+
+
+class CapeGrimLabjack(CalBoxLabjack):
+    def __init__(self, labjack_id=-1, serialNumber=None):
+        """Interface for the labjack, as it is installed at Cape Grim
+
+        Parameters
+        ----------
+        labjack_id : int, optional
+            ID number of the labjack to connect to, by default -1
+            Special values:
+                * `-1`: connect to whichever labjack we can find
+                * `None`: don't connect to a labjack, but run anyway (this is
+                  for testing without access to a labjack)
+
+        serialNumber : int, optional
+            If provided, this is the serial number of the labjack to connect to
+        """
+        super().__init__(labjack_id, serialNumber)
+
+    def _init_flags(self):
+
+        # from the previous, VB, version of the code there are valves
+        # with names A,B,C.
+        #  C - BHURD line
+        #  A - source capsule
+        #
+        # (search for EDigitalOutX) we have the following:
+        # Channel       | What happens if this channel is set to high (1)
+        # 0             | Disable stack blower for HURD
+        # 1             | Disable stack blower for BHURD
+        # 2             | Isolate HURD (this happens during a background)
+        # 3             | Isolate BHURD
+        # 4             | Open valve A (connect source capsule to inject line)
+        # 5             | Open valve B (connect inject line to HURD)
+        # 6             | Open valve C (connect inject line to BHURD)
+        # 7             | Switch on the pump pushing air through source capsule
+        # 8             | Disable HURD internal blowers
+        # 9             | Disable BHURD internal blowers
+
+        # current state of DIO channel (boolean - True/False)
+        self.digital_output_state = {}
+        # mapping from text label to DIO channel number
+        self.digital_output_channel = {}
+        # this defines how the digital outputs are wired up.
+        # I've indexed from 1 (instead of from 0, like detector_idx)
+        # because these names are visible to the user (in the database)
+        for ii, k in enumerate(
+            [
+                "DisableStackBlower1",  # 0
+                "DisableStackBlower2",  # 1
+                "ActivateCutoffValve1",  # 2
+                "ActivateCutoffValve2",  # 3
+                "ActivateInject",  # 4
+                "Inject1",  # 5
+                "Inject2",  # 6
+                "ActivatePump",  # 7
+                "DisableInternalBlower1",  # 8
+                "DisableInternalBlower2",  # 9
+            ]
+        ):
+            self.digital_output_state[k] = False
+            self.digital_output_channel[k] = ii
+
+        # flow measured on analogue channel 0,
+        # No pump voltage??
+        self.analogue_input_channel = {"Flow": 0}  # , "Pump": 1}
+
+    def flush(self):
+        """Start source-flush pump"""
+        self.digital_output_state["ActivatePump"] = True
+        self.digital_output_state["ActivateInject"] = False
+        self.digital_output_state["Inject1"] = False
+        self.digital_output_state["Inject2"] = False
+        _logger.info(f"Cal Box flush")
+        self._send_state_to_device()
+
+    def inject(self, detector_idx=0):
+        """Inject radon from source"""
+        detector_idx = int(detector_idx)
+        assert detector_idx == 0 or detector_idx == 1
+        other_detector = 1 - detector_idx
+        if self.digital_output_state[f"DisableInternalBlower{detector_idx+1}"] == True:
+            _logger.warning(
+                "Switching directly from background to inject: background may have been terminated early."
+            )
+        self.digital_output_state["ActivatePump"] = True
+        self.digital_output_state["ActivateInject"] = True
+        self.digital_output_state[f"Inject{detector_idx+1}"] = True
+        self.digital_output_state[f"Inject{other_detector+1}"] = False
+        self.digital_output_state[f"ActivateCutoffValve{detector_idx+1}"] = False
+        self.digital_output_state[f"DisableStackBlower{detector_idx+1}"] = False
+        self.digital_output_state[f"DisableInternalBlower{detector_idx+1}"] = False
+        _logger.info(f"Cal Box inject, detector {detector_idx+1}")
+        self._send_state_to_device()
+
+    def reset_flush(self):
+        """Stop source-flush pump"""
+        self.digital_output_state["ActivatePump"] = False
+        self.digital_output_state["ActivateInject"] = False
+        self.digital_output_state[f"Inject1"] = False
+        self.digital_output_state[f"Inject2"] = False
+        _logger.info(f"Cal Box flush and injection state reset")
+        self._send_state_to_device()
+
+    def start_background(self, detector_idx=0):
+        """Put detector in background mode"""
+        detector_idx = int(detector_idx)
+        assert detector_idx == 0 or detector_idx == 1
+
+        if self.digital_output_state[f"Inject{detector_idx+1}"] == True:
+            _logger.warning(
+                "Switching directly from inject to background: a surprisingly high background is likely."
+            )
+            self.digital_output_state["ActivateInject"] = False
+        self.digital_output_state[f"ActivateCutoffValve{detector_idx+1}"] = True
+        self.digital_output_state[f"DisableStackBlower{detector_idx+1}"] = True
+        self.digital_output_state[f"DisableStackBlower{detector_idx+1}"] = True
+        self.digital_output_state[f"DisableInternalBlower{detector_idx+1}"] = True
+        _logger.info(f"Cal Box entered background mode, detector {detector_idx+1}")
+        self._send_state_to_device()
+
+    def reset_background(self):
+        """Cancel a running background (but leave source flushing if it already is running)"""
+        self.digital_output_state["ActivateCutoffValve1"] = False
+        self.digital_output_state["ActivateCutoffValve2"] = False
+        self.digital_output_state["DisableStackBlower1"] = False
+        self.digital_output_state["DisableStackBlower2"] = False
+        self.digital_output_state[f"DisableInternalBlower1"] = False
+        self.digital_output_state[f"DisableInternalBlower2"] = False
+        _logger.info(f"Cal Box background state reset")
+        self._send_state_to_device()
+
+    @property
+    def status(self):
+        """generate a human-readable status message based on DIO flags"""
+        state = self.digital_output_state
+        flags = list(state.values())
+        flags_txt = str([int(itm) for itm in flags])
+
+        if not (True in flags):
+            s = "Normal operation"
+        elif flags == [
+            False,
+            False,
+            False,
+            False,
+            False,
+            False,
+            False,
+            True,
+            False,
+            False,
+        ]:
+            s = "Flushing source"
+        elif state["Inject1"]:
+            s = "Injecting from source into detector 1"
+        elif state["Inject2"]:
+            s = "Injecting from source into detector 2"
+        elif (
+            state["ActivateCutoffValve1"]
+            and state["DisableStackBlower1"]
+            and state["DisableInternalBlower1"]
+        ):
+            s = "Performing background on detector 1"
+        elif (
+            state["ActivateCutoffValve2"]
+            and state["DisableStackBlower2"]
+            and state["DisableInternalBlower2"]
+        ):
+            s = "Performing background on detector 2"
+        else:
+            s = f"Unexpected DIO state: {flags_txt}"
+        ## append all of the flags to the status message
+        # if not s.endswith(']'):
+        #    s = s+' '+flags_txt
         status = {}
         status["message"] = s
         status["digital out"] = {}
