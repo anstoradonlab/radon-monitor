@@ -412,6 +412,8 @@ def column_definition(column_name):
     # handle multiple LLD/ULD columns (e.g. LLD1, LLD2, ...)
     elif column_name.startswith("LLD") or column_name.startswith("ULD"):
         dtype = "INTEGER"
+    elif column_name.startswith("HV"):
+        dtype = "FLOAT"
     else:
         dtype = ""
 
@@ -545,6 +547,48 @@ class DataStore(object):
         data = {"Datetime": t, "EventType": event_type, "EventData": event_text}
         if detector_name is not None:
             data["Detector"] = detector_name
+        self.add_record(table_name, data)
+
+    def get_state(self, key):
+        """
+        Get a value from the persistent state key-value store
+        """
+        value = None
+        try:
+            sql = f'select value from "persistent_state" where key=="{key}";'
+            value = tuple(self.con.execute(sql).fetchall()[0])[0]
+        except (sqlite3.OperationalError, IndexError) as ex:
+            import traceback
+
+            tb = traceback.format_exc()
+            _logger.error(f"Error reading {key} from persistent state: {ex}\n{tb}")
+
+        return value
+
+    def set_state(self, key, value):
+        """
+        Set a value on the persistent state key-value store
+        """
+        table_name = "persistent_state"
+        data = {"key": key, "value": value}
+        # delete any existing data for this key
+        # Note: smarter would be to define this as a unique column?
+        sql = f'delete from "persistent_state" where "key" == "{key}";'
+        try:
+            self.con.execute(sql)
+        except (sqlite3.OperationalError, IndexError) as ex:
+            if ex.args == ("no such table: persistent_state",):
+                # this is ok, the table doesn't exist so there's nothing
+                # to delete
+                pass
+            else:
+                import traceback
+
+                tb = traceback.format_exc()
+                _logger.error(
+                    f"Error clearing '{key}' from persistent state: {ex}\n{tb}"
+                )
+
         self.add_record(table_name, data)
 
     def add_record(self, table_name, data):
@@ -1040,9 +1084,7 @@ class DataStore(object):
         return fname_archive, con_archive
 
     def get_structure_sql(self, con):
-        """
-
-        """
+        """ """
         return [
             itm[0]
             for itm in con.execute(
@@ -1053,10 +1095,10 @@ class DataStore(object):
     def copy_database(self, fname_source, fname_dest):
         """Make a copy of a database file, using the sqlite api so
         that this works even if the file is open and being written
-        
+
         Typically, fname_source would be self.data_file and fname_dest
-        would be something like 
-        
+        would be something like
+
         os.path.abspath(
             os.path.join(self._config.data_dir, "archive", "radon-backup.db")
         )
@@ -1068,7 +1110,9 @@ class DataStore(object):
         try:
             t0 = time.time()
             # open a plain connection to the live database (no type conversions etc)
-            con = sqlite3.connect(fname_source,)
+            con = sqlite3.connect(
+                fname_source,
+            )
 
             # open a connection to the new database (the destination a.k.a. backup database)
             if os.path.exists(fname_temp):
@@ -1123,7 +1167,9 @@ class DataStore(object):
         Move old data into archives
         """
         # open a plain connection to the live database (no type conversions etc)
-        con = sqlite3.connect(self.data_file,)
+        con = sqlite3.connect(
+            self.data_file,
+        )
 
         maximum_age = datetime.timedelta(days=35)
         threshold_time = datetime.datetime.now(datetime.timezone.utc) - maximum_age

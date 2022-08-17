@@ -451,17 +451,33 @@ class MainController(object):
         self._cal_system_task.cancel_background()
 
     def schedule_recurring_calibration(
-        self, flush_duration, inject_duration, t0_cal, cal_interval, detector_idx=0,
+        self,
+        flush_duration,
+        inject_duration,
+        t0_cal,
+        cal_interval,
+        detector_idx=0,
     ):
         self._cal_system_task.schedule_recurring_calibration(
-            flush_duration, inject_duration, t0_cal, cal_interval, detector_idx,
+            flush_duration,
+            inject_duration,
+            t0_cal,
+            cal_interval,
+            detector_idx,
         )
 
     def schedule_recurring_background(
-        self, duration, t0_background, background_interval, detector_idx=0,
+        self,
+        duration,
+        t0_background,
+        background_interval,
+        detector_idx=0,
     ):
         self._cal_system_task.schedule_recurring_background(
-            duration, t0_background, background_interval, detector_idx,
+            duration,
+            t0_background,
+            background_interval,
+            detector_idx,
         )
 
     def cal_and_bg_is_scheduled(self):
@@ -475,3 +491,25 @@ class MainController(object):
     @property
     def bg_running(self):
         return self._cal_system_task.bg_running
+
+    @property
+    def maintenance_mode(self):
+        k = "Maintenance Mode"
+        default_value = False
+        mm = self.datastore.get_state(k)
+        if mm is None:
+            # default value
+            mm = default_value
+            # write this into the database
+            self.datastore.set_state(k, default_value)
+
+        return bool(mm)
+
+    @maintenance_mode.setter
+    def maintenance_mode(self, mm_active):
+        k = "Maintenance Mode"
+        mm_old = self.maintenance_mode
+        if not (mm_active == mm_old):
+            _logger.info(f"Toggling maintenance mode from {mm_old} to {mm_active}")
+            self.datastore.add_log_message("MaintenanceMode", mm_active)
+            self.datastore.set_state(k, mm_active)
