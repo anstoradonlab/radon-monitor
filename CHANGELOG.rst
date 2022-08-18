@@ -2,9 +2,10 @@
 Changelog
 =========
 
-Version 0.1
-===========
+Version 10.0
+============
+18 August 2022
 
-- Feature A added
-- FIX: nasty bug #1729 fixed
-- add your changes here!
+- first release, alpha quality
+
+
