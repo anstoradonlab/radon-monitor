@@ -47,6 +47,25 @@ This is an outline of the steps required to set up `radon-monitor` on a new comp
         4. use cron to schedule calibrations/backgrounds
         4. TODO: set up RDM as a system service
 
+## Linux, Raspberry Pi
+
+TODO: fixme
+
+If we're using a Raspberry Pi, we're likely to have a dedicated machine. In this case, it's probably fine to use the system installation of Python.
+
+1. Perform a clean install of the RPi operating system
+2. Install the radon-monitor command line client:
+    `pip install --user git+https://github.com/anstoradonlab/radon-monitor.git`
+3. Install the Labjack exodriver:
+```sh
+sudo apt install build-essential libusb-1.0-0-dev
+git clone https://github.com/labjack/exodriver.git
+cd exodriver
+sudo ./install.sh
+```
+4. create a configuration file
+5. integrate with the system (cheat by using cron jobs)
+
 
 ## Basic Troubleshooting ideas
 
