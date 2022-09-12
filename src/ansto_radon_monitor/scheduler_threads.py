@@ -353,7 +353,7 @@ class CalibrationUnitThread(DataThread):
                     )
                 else:
                     _logger.error(
-                        f"Unknown kind of calibration unit: {self._config.kind}.  Known kinds are: ['generic', 'CapeGrim', 'mock', 'mockCapeGrim]"
+                        f"Unknown kind of calibration unit: {self._kind}.  Known kinds are: ['generic', 'CapeGrim', 'mock', 'mockCapeGrim]"
                     )
             except Exception as ex:
                 _logger.error(
