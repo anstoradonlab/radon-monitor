@@ -1334,7 +1334,7 @@ class DataStore(object):
             itm for itm in self.get_column_names(table_name) if not itm in cols_to_skip
         ]
 
-        def format_rec(row, headers=False):
+        def format_rec(row, headers=False, tz_offset=datetime.timedelta(seconds=0)):
             """format a row, if headers is True then format for headers
 
             The format is intended to match this:
@@ -1360,6 +1360,7 @@ class DataStore(object):
                 for k, itm in zip(row.keys(), row):
                     assert itm == row[k]
                     if k == "Datetime":
+                        itm = itm + tz_offset
                         itm = datetime.datetime.strptime(itm, DBTFMT).replace(
                             tzinfo=datetime.timezone.utc
                         )
@@ -1463,7 +1464,7 @@ class DataStore(object):
                         fd.write(format_rec(data[0], headers=True))
                         fd.write("\n")
                         for row in data:
-                            fd.write(format_rec(row))
+                            fd.write(format_rec(row, headers=False, tz_offset=tz_offset))
                             fd.write("\n")
 
     def shutdown(self):

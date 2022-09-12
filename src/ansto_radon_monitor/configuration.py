@@ -69,6 +69,7 @@ class DetectorConfig:
     thoron_delay_number_of_tanks: typing.Optional[float] = None
     datalogger_serial: int = -1
     csv_file_pattern: typing.Optional[str] = None
+    datalogger_time_offset: float = 0.0
 
 
 @dataclass

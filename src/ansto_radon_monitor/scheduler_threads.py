@@ -29,6 +29,7 @@ from ansto_radon_monitor.html import status_as_html
 _logger = logging.getLogger()
 
 from .labjack_interface import CalBoxLabjack, CapeGrimLabjack
+from .configuration import DetectorConfig
 
 
 def log_backtrace_all_threads():
@@ -780,8 +781,22 @@ class CalibrationUnitThread(DataThread):
         return False
 
 
-def fix_record(record: Dict):
-    """fix a record from cr1000"""
+def fix_record(record: Dict, time_offset: datetime.timedelta=datetime.timedelta(seconds=0)):
+    """fix a record from cr1000
+
+    Parameters
+    ----------
+    record : Dict
+        Data record
+    time_offset : datetime.timedelta, optional
+        Time offset, subtracted from record, by default datetime.timedelta(seconds=0)
+
+    Returns
+    -------
+    Dict
+        Data record, with time offset removed, timezone info added, and
+        some "Bytes" issues fixed
+    """    
     r = {}
     for k, v in record.items():
         # work around (possible but not observed) problem
@@ -795,14 +810,14 @@ def fix_record(record: Dict):
         if k.startswith("b'") and k.endswith("'"):
             new_k = k[2:-1]
         r[new_k] = v
-        # Define the timestamp as utc
+        # Define the timestamp as utc and subtract offset
         if k == "Datetime":
-            r[k] = r[k].replace(tzinfo=datetime.timezone.utc)
+            r[k] = r[k].replace(tzinfo=datetime.timezone.utc) - time_offset
     return r
 
 
 class DataLoggerThread(DataThread):
-    def __init__(self, detector_config, *args, **kwargs):
+    def __init__(self, detector_config: DetectorConfig, *args, **kwargs):
         # TODO: include type annotations
         super().__init__(*args, **kwargs)
         self.measurement_interval: int = 5  # TODO: from config?, this is in seconds
@@ -811,7 +826,7 @@ class DataLoggerThread(DataThread):
         self.status = {"link": "connecting", "serial": None}
         self.name = "DataLoggerThread"
         self.detectorName = detector_config.name
-        self.tables = []
+        self.tables: typing.List[str] = []
         # set this to a long time ago
         self._last_time_check = datetime.datetime.min
         # buffer for last 30 minutes of 10-second (RTV) measurements
@@ -950,6 +965,8 @@ class DataLoggerThread(DataThread):
         if self._datalogger is None:
             return
 
+        time_offset = datetime.timedelta(hours=self._config.datalogger_time_offset)
+
         # TODO: handle lost connection
         self.status["link"] = "retrieving data"
         with self._lock:
@@ -984,7 +1001,7 @@ class DataLoggerThread(DataThread):
                         _logger.debug(msg)
                         self.status["link"] = msg
 
-                        data = [fix_record(itm) for itm in data]
+                        data = [fix_record(itm, time_offset) for itm in data]
                         for itm in data:
                             itm["DetectorName"] = self._config.name
                             if table_name == "RTV":
@@ -1060,7 +1077,8 @@ class DataLoggerThread(DataThread):
                 # other values are just taken from the most recent info
                 values = values + [recent_data.get(k, "---") for k in info["var"][2:]]
                 # pressure, convert from Pa to hPa
-                values[-1] = round(values[-1] / 100.0, 1)
+                ### - no, this conversion happens already
+                ### values[-1] = round(values[-1] / 100.0, 1)
                 values = [str(itm) for itm in values]
         info["values"] = values
         title = self.detectorName + " Radon Detector"
@@ -1087,12 +1105,13 @@ class DataLoggerThread(DataThread):
         return datalogger time minus computer time, in seconds, as well
         as 1/2 the time it took to query the datalogger
         """
+        time_offset = datetime.timedelta(hours=self._config.datalogger_time_offset)
         # measure the length of time required to query the datalogger clock
         # -- first query it, in case of slow response due to power saving
         # -- mode or some such
-        t_datalogger = self._datalogger.gettime().replace(tzinfo=datetime.timezone.utc)
+        t_datalogger = self._datalogger.gettime().replace(tzinfo=datetime.timezone.utc) - time_offset
         tick = time.time()
-        t_datalogger = self._datalogger.gettime().replace(tzinfo=datetime.timezone.utc)
+        t_datalogger = self._datalogger.gettime().replace(tzinfo=datetime.timezone.utc) - time_offset
         t_computer = datetime.datetime.now(datetime.timezone.utc)
         tock = time.time()
         time_required_for_query = tock - tick
@@ -1108,9 +1127,10 @@ class DataLoggerThread(DataThread):
         """
         Adjust time by adding "increment_dt" seconds
         """
-        t = increment_dt
-        increment_seconds = int(t)
-        increment_nanoseconds = int((t - increment_seconds) * 1e9)
+        if self._datalogger is None:
+            return
+        increment_seconds = int(increment_dt)
+        increment_nanoseconds = int((increment_dt - increment_seconds) * 1e9)
         if not hasattr(self._datalogger.pakbus, "get_clock_cmd"):
             # Handle the case where this is not a real datalogger
             t = self._datalogger.gettime()
