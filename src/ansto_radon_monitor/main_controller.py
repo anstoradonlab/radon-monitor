@@ -258,7 +258,7 @@ class MainController(object):
                 t = MockDataLoggerThread(
                     detector_config, datastore=self.datastore, measurement_offset=2
                 )
-            elif detector_config.kind in ["L1500", "L750", "L200", "L100"]:
+            elif detector_config.kind in ["L5000", "L1500", "L750", "L200", "L100"]:
                 # note: poll the datalogger late (2 second measurement offset), so that it has a chance to update it's internal table
                 # before being asked for data.
                 t = DataLoggerThread(
