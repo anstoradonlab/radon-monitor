@@ -270,8 +270,7 @@ def config_from_commandline(
 
     if raw_cfg is None:
         if cmdline_args.configuration_file.exists():
-            with open(cmdline_args.configuration_file, "rt") as fd:
-                raw_cfg = yaml.safe_load(fd.read())
+            raw_cfg = raw_config_from_inifile(cmdline_args.configuration_file)
         else:
             _logger.error(
                 f'Configuration file "{cmdline_args.configuration_file}" does not exist.'
@@ -342,6 +341,24 @@ def config_from_inifile(filename) -> Configuration:
     one or more [detector...] sections (e.g. [detector1], [detector2])
 
     """
+    raw_cfg = raw_config_from_inifile(filename)
+    config = parse_config(raw_cfg)
+    return config
+
+def raw_config_from_inifile(filename) -> typing.Dict:
+    """read configuration from inifile as a dict
+    See also config_from_inifile
+
+    Parameters
+    ----------
+    filename : str
+        file path
+
+    Returns
+    -------
+    Dict
+        dict of configuration
+    """
     _logger.info(f"Loading configuration from: {filename}")
     configp = configparser.ConfigParser()
     configp.read(filename)
@@ -357,8 +374,7 @@ def config_from_inifile(filename) -> Configuration:
         else:
             raw_cfg[section] = dict(configp[section])
     raw_cfg["detectors"] = detectors_config
-    config = parse_config(raw_cfg)
-    return config
+    return raw_cfg
 
 
 if __name__ == "__main__":
