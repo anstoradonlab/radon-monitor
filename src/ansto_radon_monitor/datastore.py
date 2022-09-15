@@ -22,6 +22,8 @@ _logger = logging.getLogger(__name__)
 # database time format
 DBTFMT = "%Y-%m-%d %H:%M:%S"
 
+# create views in database (searches for recent data)
+CREATE_VIEWS = False
 
 def format_date(t):
     """
@@ -402,6 +404,9 @@ def column_definition(column_name):
         "HV": "FLOAT",
         "PanTemp": "FLOAT",
         "BatV": "FLOAT",
+        "Batt_V": "FLOAT",
+        "Int_T": "FLOAT",
+        "AirT": "FLOAT",
         "LLD": "INTEGER",
         "ULD": "INTEGER",
     }
@@ -417,7 +422,7 @@ def column_definition(column_name):
     else:
         dtype = ""
 
-    return f"{column_name} {dtype}".strip()
+    return f'"{column_name}" {dtype}'.strip()
 
 
 class DataStore(object):
@@ -487,6 +492,10 @@ class DataStore(object):
                 con.execute(
                     "CREATE TABLE IF NOT EXISTS detector_names (id INTEGER PRIMARY KEY, name TEXT UNIQUE)"
                 )
+                # create the persistent state table
+                con.execute(
+                    "CREATE TABLE IF NOT EXISTS persistent_state (key,value)"
+                )
 
         return self._connection_per_thread[tid]
 
@@ -509,8 +518,9 @@ class DataStore(object):
             nrows = 1440 * 6 * 2  # twice the batchsize in mock data generator
         else:
             nrows = 1440 * 6 * 2  # twice the batchsize in mock data generator
-        sql = f"CREATE VIEW if not exists {view_name} as SELECT * from {table_name} ORDER BY rowid DESC LIMIT {nrows}"
-        cur.execute(sql)
+        if CREATE_VIEWS:
+            sql = f"CREATE VIEW if not exists {view_name} as SELECT * from {table_name} ORDER BY rowid DESC LIMIT {nrows}"
+            cur.execute(sql)
         self.con.commit()
 
     def get_column_names(self, table_name):
@@ -519,7 +529,7 @@ class DataStore(object):
         ]
         return db_column_names
 
-    def modify_table(self, table_name, data):
+    def modify_table(self, table_name, data, quiet=False):
         # work out which columns are not present in the table at present
         column_names = list(data.keys())
         db_column_names = [
@@ -531,9 +541,10 @@ class DataStore(object):
         # print('-----------\n'+ '\n'.join((dict(itm).__repr__() for itm in db_column_names))+'\n----------')
         # add each missing column to the table
         for column_name in missing_column_names:
-            _logger.warning(
-                f'Adding missing column ({column_name}) to table "{table_name}"'
-            )
+            if not quiet:
+                _logger.warning(
+                    f'Adding missing column ({column_name}) to table "{table_name}"'
+                )
             col_definition = column_definition(column_name)
             sql = f"ALTER TABLE {table_name} ADD {col_definition}"
             self.con.execute(sql)
@@ -557,6 +568,8 @@ class DataStore(object):
         try:
             sql = f'select value from "persistent_state" where key=="{key}";'
             value = tuple(self.con.execute(sql).fetchall()[0])[0]
+        except IndexError:
+            _logger.debug(f"Reading state, key missing from database: {key}")
         except (sqlite3.OperationalError, IndexError) as ex:
             import traceback
 
@@ -604,7 +617,9 @@ class DataStore(object):
 
         cur = self.con.cursor()
         column_names = list(data[0].keys())
-        sql = f"insert into {table_name} ({','.join(column_names)}) values ({ ','.join(['?']*len(data[0])) })"
+        quoted_column_names = [f'"{itm}"' for itm in column_names]
+
+        sql = f"insert into \"{table_name}\" ({','.join(quoted_column_names)}) values ({ ','.join(['?']*len(data[0])) })"
         _logger.debug(f"Executing SQL: {sql}")
 
         # special handling for DetectorName
@@ -1333,6 +1348,7 @@ class DataStore(object):
         colnames = [
             itm for itm in self.get_column_names(table_name) if not itm in cols_to_skip
         ]
+        colnames_quoted = [f'"{itm}"' for itm in colnames]
 
         def format_rec(row, headers=False, tz_offset=datetime.timedelta(seconds=0)):
             """format a row, if headers is True then format for headers
@@ -1393,13 +1409,13 @@ class DataStore(object):
                 detector_name = detector_config.name
                 exec_t0 = datetime.datetime.now(datetime.timezone.utc)
                 sql = (
-                    f"SELECT {','.join(colnames)} from Results LEFT OUTER JOIN detector_names ON Results.DetectorName=detector_names.id "
+                    f"SELECT {','.join(colnames_quoted)} from Results LEFT OUTER JOIN detector_names ON Results.DetectorName=detector_names.id "
                     f'WHERE Datetime >= "{t0_query.strftime(DBTFMT)}" and Datetime < "{t1_query.strftime(DBTFMT)}" and name = "{detector_name}"'
                 )
 
                 try:
                     data = self.con.execute(sql).fetchall()
-                except sqlite.OperationalError as ex:
+                except sqlite3.OperationalError as ex:
                     if ex.args == ("no such column: Results.DetectorName",):
                         # this may happen on a new database, where the results column has been created
                         # but nothing yet written
