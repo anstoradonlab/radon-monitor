@@ -277,6 +277,11 @@ class CalibrationUnitThread(DataThread):
         labjack_id = config.calbox.labjack_id
         serialNumber = config.calbox.labjack_serial
 
+        # this is the thread which is allowed to access the hardware directly
+        self._thread_ident = None
+        self._data = None
+        self._status_cache = None
+
         # Labjack API needs None for serialNumber if we are to ignore it
         if serialNumber == -1:
             serialNumber = None
@@ -310,7 +315,7 @@ class CalibrationUnitThread(DataThread):
         if config.calbox.kind == "mock":
             labjack_id = None
 
-        self._schedule_connection(labjack_id, serialNumber)
+        self._schedule_connection(labjack_id, serialNumber, delay=0)
 
         # ensure that the scheduler function is run immediately on startup
         self.state_changed.set()
@@ -336,6 +341,7 @@ class CalibrationUnitThread(DataThread):
 
     @task_description("Calibration unit: initialize")
     def connect_to_labjack(self, labjack_id, serialNumber):
+        self._thread_ident = threading.get_ident()
         with self._lock:
             try:
                 if self._kind == "mock":
@@ -435,8 +441,10 @@ class CalibrationUnitThread(DataThread):
             data.update(self._labjack.analogue_states)
             data.update(self._labjack.digital_output_state)
 
-        # send measurement to datastore
-        self._datastore.add_record(self._data_table_name, data)
+            # update data cache (for properties)
+            self._data = data
+            # send measurement to datastore
+            self._datastore.add_record(self._data_table_name, data)
 
     # don't include this function in the list of tasks
     # @task_description("Calibration unit: measure state")
@@ -741,7 +749,17 @@ class CalibrationUnitThread(DataThread):
             status = {}
             status["message"] = "no connection"
         else:
-            status = self._labjack.status
+            if threading.get_ident() == self._thread_ident:
+                status = self._labjack.status
+                self._status_cache = status
+            else:
+                # use the cache if we are not inside the thread
+                # which is permitted to talk to the hardware
+                status = self._status_cache
+                if status is None:
+                    status = {}
+                    status["message"] = "no connection"
+            
 
         return status
 
@@ -813,6 +831,46 @@ def fix_record(record: Dict, time_offset: datetime.timedelta=datetime.timedelta(
         # Define the timestamp as utc and subtract offset
         if k == "Datetime":
             r[k] = r[k].replace(tzinfo=datetime.timezone.utc) - time_offset
+    # special case, multiple head detector fields like LLD(1), LLD(2), ...    
+    if "HV(1)" in r.keys() or "HV_Avg(1)" in r.keys():
+        if "HV_Avg(1)" in r.keys():
+            suffix_av = "_Avg"
+            suffix_tot = "_Tot"
+        else:
+            suffix_av = ""
+            suffix_tot = ""
+        try:
+            k_summary = "LLD"+suffix_tot
+            if not k_summary in r:
+                cols = [k for k in r if k.startswith("LLD") and k.endswith(")")]
+                if len(cols) > 0:
+                    r[k_summary] = np.sum([r[k] for k in cols])
+            k_summary = "ULD"+suffix_tot
+            if not k_summary in r:
+                cols = [k for k in r if k.startswith("ULD") and k.endswith(")")]
+                if len(cols) > 0:
+                    r[k_summary] = np.sum([r[k] for k in cols])
+            k_summary = "HV"+suffix_av
+            if not k_summary in r:
+                cols = [k for k in r if k.startswith("HV") and k.endswith(")")]
+                if len(cols) > 0:
+                    r[k_summary] = np.mean([r[k] for k in cols])
+            k_summary = "InFlow"+suffix_av
+            if not k_summary in r:
+                cols = [k for k in r if k.startswith("InFl") and k.endswith(")")]
+                if len(cols) > 0:
+                    r[k_summary] = np.mean([r[k] for k in cols])
+        except Exception as ex:
+            _logger.error(f"Error adding summary information to record.  Data: {record}, Error: {ex}")
+
+    if "HV(1)" in r.keys() or "HV_Avg(1)" in r.keys():
+        # rename HV(1) etc to HV1, HV2
+        new_r = {}
+        for k,v in r.items():
+            new_k = k.replace('(','').replace(')','')
+            new_r[new_k] = v
+        r = new_r
+
     return r
 
 
@@ -821,6 +879,12 @@ class DataLoggerThread(DataThread):
         # TODO: include type annotations
         super().__init__(*args, **kwargs)
         self.measurement_interval: int = 5  # TODO: from config?, this is in seconds
+        # a list of tables which are to be read from the datalogger (if present)
+        self._tables_to_use = ["Results", "RTV", "HURD2OUT"]
+        # Rename certain tables
+        # use like this:
+        #  {"NAME_ON_DATALOGGER": "NAME_IN_DATABASE"}
+        self._rename_table = {"HURD2OUT": "Results"}
         self._config = detector_config
         self._datalogger: typing.Optional[CR1000] = None
         self.status = {"link": "connecting", "serial": None}
@@ -895,7 +959,13 @@ class DataLoggerThread(DataThread):
             device = self._datalogger
             self._datalogger = None
             try:
-                device.pakbus.link._serial.close()
+                if hasattr(device.pakbus.link, "_serial"):
+                    # connection is using a pylink object
+                    device.pakbus.link._serial.close()
+                elif hasattr(device.pakbus.link, "close"):
+                    # connection is using a pyserial object
+                    device.pakbus.link._serial.close()
+                    
             except Exception as ex:
                 _logger.error(f"Error while trying to close serial port: {ex}")
 
@@ -932,8 +1002,7 @@ class DataLoggerThread(DataThread):
                 # table discovery can be slow too
                 self.update_heartbeat_time()
                 # Filter the tables - only include the ones which are useful
-                tables_to_use = ["Results", "RTV"]
-                self.tables = [itm for itm in self.tables if itm in tables_to_use]
+                self.tables = [itm for itm in self.tables if itm in self._tables_to_use]
 
                 self.status["link"] = "connected"
                 self.status["serial"] = int(self._datalogger.getprogstat()["SerialNbr"])
@@ -971,21 +1040,26 @@ class DataLoggerThread(DataThread):
         self.status["link"] = "retrieving data"
         with self._lock:
             for table_name in self.tables:
-                # it's possible to send data from each datalogger to a separate table.
+                destination_table_name = self._rename_table.get(table_name, table_name)
+                # it's possible we might like to send data from each datalogger to a separate table.
                 # destination_table_name = self._config.name + "_" + table_name
-                destination_table_name = table_name
                 update_time = self._datastore.get_update_time(
                     destination_table_name, self.detectorName
                 )
                 if update_time is not None:
+                    # offset a little so that we don't grab the same record again and again
                     update_time += datetime.timedelta(seconds=1)
-                # The get_data_generator function doesn't like timezones
-                if update_time is not None:
+                    # The get_data_generator function doesn't like timezones
                     update_time = update_time.replace(tzinfo=None)
-
+                    # convert from UTC (all timestamps in database are UTC) into
+                    # the datalogger's timezone (usually UTC, but sometimes not)
+                    update_time = update_time + time_offset
                 total_num_records = 0
+                # set stop date to a time in the future (because of the possibility that
+                # datalogger timezone doesn't match the computer timezone)
+                stop_date = datetime.datetime.utcnow() + datetime.timedelta(days=2)
                 for data in self._datalogger.get_data_generator(
-                    table_name, start_date=update_time
+                    table_name, start_date=update_time, stop_date=stop_date
                 ):
                     # return early if another task is trying to execute
                     # (likely this is a shutdown request)
@@ -1071,15 +1145,40 @@ class DataLoggerThread(DataThread):
 
                         values = ["wait2", "wait2"]
                     else:
-                        lld_total = sum([itm["LLD"] for itm in self._rtv_buffer])
-                        uld_total = sum([itm["ULD"] for itm in self._rtv_buffer])
+                        try:
+                            lld_total = sum([itm["LLD"] for itm in self._rtv_buffer])
+                        except KeyError:
+                            lld_total = '---'
+                        try:
+                            uld_total = sum([itm["ULD"] for itm in self._rtv_buffer])
+                        except KeyError:
+                            uld_total = '---'
                         values = [lld_total, uld_total]
                 # other values are just taken from the most recent info
+                def converter(k):
+                    """return the correct conversion function for key "k" """
+                    do_nothing = lambda x: x
+                    if k.startswith("LLD") or k.startswith("ULD") or k.startswith("Press"):
+                        c = int
+                    elif k.startswith("HV") or k.startswith("InFlow"):
+                        c = lambda x: round(x, 1)
+                    else:
+                        c = do_nothing
+                    return c
                 values = values + [recent_data.get(k, "---") for k in info["var"][2:]]
+                # round-off values, etc
+                values_formatted = []
+                for k,v in zip(info["var"], values):
+                    try:
+                        cv = converter(k)(v)
+                    except:
+                        cv = v
+                    values_formatted.append(cv)
+                
                 # pressure, convert from Pa to hPa
                 ### - no, this conversion happens already
                 ### values[-1] = round(values[-1] / 100.0, 1)
-                values = [str(itm) for itm in values]
+                values = [str(itm) for itm in values_formatted]
         info["values"] = values
         title = self.detectorName + " Radon Detector"
         html = status_as_html(title, info)
