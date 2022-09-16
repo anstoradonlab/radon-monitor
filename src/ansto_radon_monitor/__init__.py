@@ -13,6 +13,8 @@ try:
     dist_name = __name__
     __version__ = version(dist_name)
 except PackageNotFoundError:  # pragma: no cover
-    __version__ = "unknown"
+    # TODO: fix this properly using the PyInstaller Spec file
+    # https://github.com/pyinstaller/pyinstaller/discussions/6033
+    __version__ = "10.1"
 finally:
     del version, PackageNotFoundError
