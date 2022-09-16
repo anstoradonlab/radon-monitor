@@ -1376,10 +1376,9 @@ class DataStore(object):
                 for k, itm in zip(row.keys(), row):
                     assert itm == row[k]
                     if k == "Datetime":
-                        itm = itm + tz_offset
                         itm = datetime.datetime.strptime(itm, DBTFMT).replace(
                             tzinfo=datetime.timezone.utc
-                        )
+                        ) + tz_offset
                         doy = itm.timetuple().tm_yday
                         itm_str = f"{itm.year}, {doy},{itm.month},{itm.day}, {itm.strftime('%H:%M')}"
                         output.append(itm_str)
