@@ -445,6 +445,8 @@ class CalibrationUnitThread(DataThread):
             self._data = data
             # send measurement to datastore
             self._datastore.add_record(self._data_table_name, data)
+            # update the status cache
+            _ = self.status
 
     # don't include this function in the list of tasks
     # @task_description("Calibration unit: measure state")
