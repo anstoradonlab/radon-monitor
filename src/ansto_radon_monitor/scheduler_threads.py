@@ -916,7 +916,7 @@ class DataLoggerThread(DataThread):
         ser = serial.Serial(
             port=None,
             baudrate=detector_config.baudrate,
-            timeout=2,
+            timeout=30,
             bytesize=serial.EIGHTBITS,
             parity=serial.PARITY_NONE,
             stopbits=1,
