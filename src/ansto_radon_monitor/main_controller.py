@@ -31,7 +31,7 @@ else:
 import sys
 
 _logger = logging.getLogger(__name__)
-from ansto_radon_monitor.configuration import Configuration
+from ansto_radon_monitor.configuration import (Configuration, setup_logging)
 from ansto_radon_monitor.datastore import DataStore
 from ansto_radon_monitor.html import get_html_page
 
@@ -82,6 +82,8 @@ def initialize(configuration: Configuration, mode: str = "thread"):
         #    # check out this for a solution: https://gist.github.com/shiplu/0f1fd2f2a06519d0530c92533e18f264
         #    register_sigint_handler(controller.shutdown_and_exit)
         register_sigint_handler(controller.shutdown_and_exit)
+        # take over logging
+        setup_logging(configuration.loglevel, configuration.logfile)
         s.run()
 
     if mode == "foreground":

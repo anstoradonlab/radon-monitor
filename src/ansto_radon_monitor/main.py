@@ -19,13 +19,12 @@ import argparse
 import logging
 import sys
 import time
-from logging import StreamHandler
-from logging.handlers import RotatingFileHandler
 
 from ansto_radon_monitor import __version__
 from ansto_radon_monitor.configuration import (Configuration,
                                                config_from_commandline,
-                                               parse_args)
+                                               parse_args,
+                                               setup_logging)
 from ansto_radon_monitor.datastore import DataStore
 from ansto_radon_monitor.main_controller import MainController, initialize
 
@@ -34,54 +33,6 @@ __copyright__ = "Alan Griffiths"
 __license__ = "mit"
 
 _logger = logging.getLogger(__name__)
-
-
-def setup_logging(loglevel=logging.DEBUG, logfn=None):
-    """Setup basic logging
-
-    Args:
-        loglevel (int): minimum loglevel for emitting messages
-        logfn (str): file name to log messages to (if None, don't log messages to file)
-
-    """
-    # exclude information messages for Pylink and Pycr1000
-    for mod in ["pycampbellcr1000", "pylink"]:
-        logging.getLogger(mod).setLevel(logging.CRITICAL)
-
-    rootlogger = logging.getLogger()
-    rootlogger.setLevel(loglevel)
-    # logformat = "[%(asctime)s] %(levelname)s:%(name)s:%(message)s"
-    log_format = "[%(levelname)1.1s %(asctime)s %(module)s:%(lineno)d %(threadName)s] %(message)s"
-    datefmt = "%Y-%m-%d %H:%M:%S%z"
-
-    # add a stream handler if non is present
-    if len(rootlogger.handlers) == 0:
-        stream_handler = StreamHandler(sys.stderr)
-        stream_handler.setLevel(loglevel)
-        rootlogger.addHandler(stream_handler)
-
-    if logfn is not None:
-        # check for existing RotatingFileHandlers and remove them
-        for hdlr in rootlogger.handlers:
-            if isinstance(hdlr, RotatingFileHandler):
-                rootlogger.removeHandler(hdlr)
-
-        file_handler = RotatingFileHandler(
-            logfn,
-            mode="a",
-            maxBytes=5 * 1024 * 1024,
-            backupCount=10,
-            encoding=None,
-            delay=0,
-        )
-        log_formatter = logging.Formatter(log_format, datefmt=datefmt)
-        file_handler.setFormatter(log_formatter)
-        file_handler.setLevel(loglevel)
-        rootlogger.addHandler(file_handler)
-
-    log_formatter = logging.Formatter(log_format, datefmt=datefmt)
-    for hdlr in rootlogger.handlers:
-        hdlr.formatter = log_formatter
 
 
 def main(args):
