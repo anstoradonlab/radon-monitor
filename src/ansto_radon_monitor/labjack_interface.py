@@ -467,23 +467,19 @@ class CapeGrimLabjack(CalBoxLabjack):
 
     def _init_flags(self):
 
-        # from the previous, VB, version of the code there are valves
-        # with names A,B,C.
-        #  C - BHURD line
-        #  A - source capsule
-        #
-        # (search for EDigitalOutX) we have the following:
+        # Based on a field trip (Oct 2022) we have the following:
         # Channel       | What happens if this channel is set to high (1)
-        # 0             | Disable stack blower for HURD
-        # 1             | Disable stack blower for BHURD
+        # 0             | Disable stack blower for BHURD
+        # 1             | Disable stack blower for HURD
         # 2             | Isolate HURD (this happens during a background)
         # 3             | Isolate BHURD
         # 4             | Open valve A (connect source capsule to inject line)
         # 5             | Open valve B (connect inject line to HURD)
         # 6             | Open valve C (connect inject line to BHURD)
         # 7             | Switch on the pump pushing air through source capsule
-        # 8             | Disable HURD internal blowers
-        # 9             | Disable BHURD internal blowers
+        # 8             | Disable BHURD internal blowers
+        # 9             | Disable HURD internal blowers
+
 
         # current state of DIO channel (boolean - True/False)
         self.digital_output_state = {}
@@ -494,16 +490,16 @@ class CapeGrimLabjack(CalBoxLabjack):
         # because these names are visible to the user (in the database)
         for ii, k in enumerate(
             [
-                "DisableStackBlower1",  # 0
-                "DisableStackBlower2",  # 1
+                "DisableStackBlower2",  # 0
+                "DisableStackBlower1",  # 1
                 "ActivateCutoffValve1",  # 2
                 "ActivateCutoffValve2",  # 3
                 "ActivateInject",  # 4
                 "Inject1",  # 5
                 "Inject2",  # 6
                 "ActivatePump",  # 7
-                "DisableInternalBlower1",  # 8
-                "DisableInternalBlower2",  # 9
+                "DisableInternalBlower2",  # 8
+                "DisableInternalBlower1",  # 9
             ]
         ):
             self.digital_output_state[k] = False
@@ -560,10 +556,13 @@ class CapeGrimLabjack(CalBoxLabjack):
                 "Switching directly from inject to background: a surprisingly high background is likely."
             )
             self.digital_output_state["ActivateInject"] = False
-        self.digital_output_state[f"ActivateCutoffValve{detector_idx+1}"] = True
-        self.digital_output_state[f"DisableStackBlower{detector_idx+1}"] = True
+        # disable stack blower and allow some time for it to slow before closing the isolation valve
         self.digital_output_state[f"DisableStackBlower{detector_idx+1}"] = True
         self.digital_output_state[f"DisableInternalBlower{detector_idx+1}"] = True
+        self._send_state_to_device()
+        time.sleep(5)
+
+        self.digital_output_state[f"ActivateCutoffValve{detector_idx+1}"] = True
         _logger.info(f"Cal Box entered background mode, detector {detector_idx+1}")
         self._send_state_to_device()
 
