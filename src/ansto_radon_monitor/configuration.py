@@ -114,6 +114,7 @@ class Configuration:
     data_dir: pathlib.Path = pathlib.Path(".", "data").absolute()
     data_file: typing.Optional[pathlib.Path] = None
     legacy_file_timezone: float = 0
+    backup_time_of_day: datetime.time = datetime.time(0,10)
     detectors: typing.List[DetectorConfig] = field(default_factory=list)
     calbox: CalUnitConfig = CalUnitConfig()
     ftp: FtpConfig = FtpConfig()
@@ -132,6 +133,7 @@ def parse_config(raw_cfg) -> Configuration:
         #        DetectorKind: parse_detector_kind,
         bool: str2bool,
         float: float,
+        datetime.time: lambda x: datetime.datetime.strptime(x, '%H:%M').time()
     }
 
     # create and validate the Configuration object

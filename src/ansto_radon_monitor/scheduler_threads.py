@@ -1350,7 +1350,7 @@ class MockCR1000(object):
     def close(self):
         pass
 
-    def get_data_generator(self, table_name, start_date):
+    def get_data_generator(self, table_name, start_date, stop_date=None):
         """define some mock data which looks like it came from a datalogger
 
         This behaves in a similar way to CR1000.get_data_generator
@@ -1359,6 +1359,9 @@ class MockCR1000(object):
         if start_date is not None:
             if start_date.tzinfo is None:
                 start_date = start_date.replace(tzinfo=datetime.timezone.utc)
+        if stop_date is not None:
+            if stop_date.tzinfo is None:
+                stop_date = stop_date.replace(tzinfo=datetime.timezone.utc)
         # number of records to return at once
         # Database is good with 1440 * 6, but if we
         # plan to query the rowid column later it's better to keep
@@ -1444,10 +1447,11 @@ class MockCR1000(object):
                 }
 
             if start_date is None or t >= start_date:
-                recs_to_return.append(itm)
-                if len(recs_to_return) >= batchsize:
-                    yield recs_to_return
-                    recs_to_return = []
+                if stop_date is None or t <= stop_date:
+                    recs_to_return.append(itm)
+                    if len(recs_to_return) >= batchsize:
+                        yield recs_to_return
+                        recs_to_return = []
         if len(recs_to_return) > 0:
             yield recs_to_return
 
@@ -1487,8 +1491,7 @@ class DataMinderThread(DataThread):
         self._csv_output_lock = threading.RLock()
 
         # perform some tasks a short time after startup
-        # TODO: obtain backup time from configuration file
-        backup_time_of_day = datetime.time(0, 10)
+        backup_time_of_day = config.backup_time_of_day
         delay_seconds = 10 * 60
         self._scheduler.enter(
             delay=delay_seconds,
