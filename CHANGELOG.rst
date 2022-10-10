@@ -24,3 +24,6 @@ Version 10.1
 
     [data]
     backup_time_of_day=10:15
+
+Version 10.2
+============
