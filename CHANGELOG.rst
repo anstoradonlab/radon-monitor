@@ -36,3 +36,4 @@ XX Relese Date XX
 - Certain tasks (e.g. syncing time and downloading files from datalogger) are allowed to take
   much longer before they are identifed as having hung
 - Provide more detail in log message diagnostics
+- Fix external flow rate display (now showing mean flow rate over the last 30 minutes)

@@ -1137,29 +1137,31 @@ class DataLoggerThread(DataThread):
     def html_current_status(self):
         """Return the current measurement status as html"""
         info = {
-            "var": ["LLD", "ULD", "HV", "InFlow", "ExFlow", "AirT", "RelHum", "Pres"],
+            "var": ["LLD", "ULD", "ExFlow", "HV", "InFlow", "AirT", "RelHum", "Pres"],
             "description": [
                 "Total Counts",
                 "Noise Counts",
-                "PMT Voltage",
-                "Internal Flow Velocity",
                 "External Flow Rate",
+                "PMT Voltage",
+                "Internal Flow Vel.",
                 "Air Temperature",
                 "Relative Humidity",
                 "Pressure",
             ],
             "units": [
-                "Last 30 minutes",
-                "Last 30 minutes",
+                "Last 30 min",
+                "Last 30 min",
+                "L/min",
                 "V",
                 "m/s",
-                "L/min",
                 "deg C",
                 "%",
                 "hPa",
             ],
         }
         nvar = len(info["var"])
+        # Exflow needs to be treated similarly to LLD and ULD
+        exflow_value = "---"
 
         if len(self._rtv_buffer) == 0:
             values = ["---"] * nvar
@@ -1174,7 +1176,7 @@ class DataLoggerThread(DataThread):
             else:
                 # don't yet have 30 minutes of data
                 if len(self._rtv_buffer) < self._rtv_buffer.maxlen:
-                    values = ["wait", "wait"]
+                    values = ["wait", "wait", "wait"]
                 else:
                     time_span = (
                         self._rtv_buffer[-1]["Datetime"]
@@ -1184,7 +1186,7 @@ class DataLoggerThread(DataThread):
                         # the buffer is the correct length, but it covers the wrong period
                         # (logging might have been interrupted)
 
-                        values = ["wait2", "wait2"]
+                        values = ["wait2", "wait2", "wait2"]
                     else:
                         try:
                             lld_total = sum([itm["LLD"] for itm in self._rtv_buffer])
@@ -1194,19 +1196,24 @@ class DataLoggerThread(DataThread):
                             uld_total = sum([itm["ULD"] for itm in self._rtv_buffer])
                         except KeyError:
                             uld_total = '---'
-                        values = [lld_total, uld_total]
+                        try:
+                            exflow_total = sum([itm["ExFlow"] for itm in self._rtv_buffer])
+                        except KeyError:
+                            exflow_total = '---'
+                        values = [lld_total, uld_total, exflow_total]
+
                 # other values are just taken from the most recent info
                 def converter(k):
                     """return the correct conversion function for key "k" """
                     do_nothing = lambda x: x
                     if k.startswith("LLD") or k.startswith("ULD") or k.startswith("Press"):
                         c = int
-                    elif k.startswith("HV") or k.startswith("InFlow"):
+                    elif k.startswith("HV") or k.startswith("InFlow") or k.startswith("ExFlow"):
                         c = lambda x: round(x, 1)
                     else:
                         c = do_nothing
                     return c
-                values = values + [recent_data.get(k, "---") for k in info["var"][2:]]
+                values = values + [recent_data.get(k, "---") for k in info["var"][3:]]
                 # round-off values, etc
                 values_formatted = []
                 for k,v in zip(info["var"], values):
@@ -1447,7 +1454,7 @@ class MockCR1000(object):
                 itm = {
                     "Datetime": t,
                     "RecNbr": rec_num,
-                    "ExFlow": 80.01,
+                    "ExFlow": 80.01 / 6.0 / 30.0,
                     "InFlow": 11.1,
                     "LLD": rng.poisson(rn_func(t) / 6.0 / 30.0),
                     "ULD": 0,
@@ -1463,7 +1470,7 @@ class MockCR1000(object):
                 itm = {
                     "Datetime": t,
                     "RecNbr": rec_num,
-                    "ExFlow_Tot": 0.0,
+                    "ExFlow_Tot": 80.01,
                     "InFlow_Avg": -13.84,
                     "LLD_Tot": rng.poisson(rn_func(t)),
                     "ULD_Tot": 0.0,
