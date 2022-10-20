@@ -131,17 +131,21 @@ class DataThread(threading.Thread):
         self._lock = threading.RLock()
         now = time.time()
         delay = next_interval(now, self.measurement_interval, self.measurement_offset)
+        # how long to wait (seconds) before re-connecting.  This delay
+        # gets longer on multiple failures
+        self._reconnect_delay = 30
+
         _logger.debug(f"next time: {delay+now} (next - now : {delay})")
         if run_measurement_on_startup:
             delay = 0
         self._scheduler.enter(delay=delay, priority=0, action=self.run_measurement)
 
-        _logger.debug(f"Scheduler queue: {self._scheduler.queue}")
-
         # this is used for detecting a hang
         self._heartbeat_time_lock = threading.RLock()
         self._heartbeat_time = time.time()
         self._tolerate_hang = False
+        # maximum time allowed before the thread is assumed to have hung
+        self.max_heartbeat_age_seconds = 10
 
         self._scheduler.enter(delay=1, priority=0, action=self.update_heartbeat_time)
 
@@ -168,7 +172,6 @@ class DataThread(threading.Thread):
         _logger.debug(
             f"Taking measurement at {datetime.datetime.now(datetime.timezone.utc)}"
         )
-        _logger.debug(f"Scheduler queue: {self._scheduler.queue}")
 
     def reconnect_func(self):
         _logger.debug(f"Reconnect function - stub")
@@ -225,7 +228,6 @@ class DataThread(threading.Thread):
             action=self.run_measurement,
         )
 
-        _logger.debug(f"Scheduler queue: {self._scheduler.queue}")
 
     def run(self):
         try:
@@ -251,14 +253,14 @@ class DataThread(threading.Thread):
                     _logger.debug(f"Time until next event: {time_until_next_event}")
 
                     assert time_until_next_event >= 0
-                    _logger.debug(f"Q: {self._scheduler.queue}")
-                    _logger.debug(f"Task Queue: {self.task_queue}")
+                    #_logger.debug(f"Q: {self._scheduler.queue}")
+                    #_logger.debug(f"Task Queue: {self.task_queue}")
 
             _logger.debug(f"{self.name} has finished and will call shutdown_func()")
             self.shutdown_func()
         except Exception as ex:
             _logger.error(
-                f"{self.name} is aborting with an unhandled exception. Stack trace for all threads follows."
+                f'{self.name} is aborting with an unhandled exception: "{ex}". Stack trace for all threads follows.'
             )
             for th in threading.enumerate():
                 _logger.error(f"Thread {th}")
@@ -362,12 +364,15 @@ class CalibrationUnitThread(DataThread):
                     _logger.error(
                         f"Unknown kind of calibration unit: {self._kind}.  Known kinds are: ['generic', 'CapeGrim', 'mock', 'mockCapeGrim]"
                     )
+                # no exception - set the reconnect delay to default
+                self._reconnect_delay = 30
             except Exception as ex:
+                self._reconnect_delay = min(self._reconnect_delay*2, 300)
+                self._schedule_connection(labjack_id, serialNumber, delay=self._reconnect_delay)
                 _logger.error(
                     "Unable to connect to calibration system LabJack using "
-                    f"ID: {labjack_id} serial: {serialNumber} because of error: {ex}.  Retrying in 10sec."
+                    f"ID: {labjack_id} serial: {serialNumber} because of error: {ex}.  Retrying in {self._reconnect_delay}sec."
                 )
-                self._schedule_connection(labjack_id, serialNumber)
 
     @task_description("Calibration unit: flush source")
     def set_flush_state(self):
@@ -890,7 +895,7 @@ class DataLoggerThread(DataThread):
         self._config = detector_config
         self._datalogger: typing.Optional[CR1000] = None
         self.status = {"link": "connecting", "serial": None}
-        self.name = "DataLoggerThread"
+        self.name = f"DataLoggerThread({detector_config.name})"
         self.detectorName = detector_config.name
         self.tables: typing.List[str] = []
         # set this to a long time ago
@@ -974,12 +979,22 @@ class DataLoggerThread(DataThread):
                     device.pakbus.link._serial.close()
                 elif hasattr(device.pakbus.link, "close"):
                     # connection is using a pyserial object
-                    device.pakbus.link._serial.close()
+                    device.pakbus.link.close()
                     
             except Exception as ex:
                 _logger.error(f"Error while trying to close serial port: {ex}")
 
-        self.connect_to_datalogger(self._config)
+        self._scheduler.enter(
+            delay=0,
+            priority=-1000,  # needs to happend before anything else will work
+            action=self.connect_to_datalogger,
+            kwargs={"detector_config": self._config},
+        )
+
+        # Simulated error
+        #import random
+        #if random.random() > 0.5:
+        #    raise RuntimeError("Pretend error during re-connection")
 
     @task_description("Data logger: initialize")
     def connect_to_datalogger(self, detector_config):
@@ -988,17 +1003,22 @@ class DataLoggerThread(DataThread):
                 self.status["link"] = "connecting to datalogger"
                 try:
                     self._connect(detector_config)
+                    # on success, reset reconnect delay
+                    self._reconnect_delay = 30
                 except Exception as ex:
                     _logger.error(
                         "Unable to connect to data logger "
                         f"config: {detector_config} because of error: {ex}.  Retrying in 30sec."
                     )
                     self._scheduler.enter(
-                        delay=30,
+                        delay=self._reconnect_delay,
                         priority=-1000,  # needs to happend before anything else will work
                         action=self.connect_to_datalogger,
                         kwargs={"detector_config": detector_config},
                     )
+                    # make re-connect delay longer in case of failure
+                    # up to a maximum of 300 seconds
+                    self._reconnect_delay = min(self._reconnect_delay*2, 300)
                     return
 
                 # connect can take a long time, but this is Ok
@@ -1049,6 +1069,10 @@ class DataLoggerThread(DataThread):
         # TODO: handle lost connection
         self.status["link"] = "retrieving data"
         with self._lock:
+            # simulate an intermittent error
+            #import random
+            #if random.random() > 0.9:
+            #    raise RuntimeError("This is not a real error")
             for table_name in self.tables:
                 destination_table_name = self._rename_table.get(table_name, table_name)
                 # it's possible we might like to send data from each datalogger to a separate table.
@@ -1099,9 +1123,16 @@ class DataLoggerThread(DataThread):
         if datetime.datetime.now(
             datetime.timezone.utc
         ) - self._last_time_check > datetime.timedelta(days=15):
-            self.synchronise_clock()
-            self.log_status()
-            self._last_time_check = datetime.datetime.now(datetime.timezone.utc)
+            # each of these steps might be slow
+            saved_max_hb_age = self.max_heartbeat_age_seconds
+            self.max_heartbeat_age_seconds = 300
+            try:
+                self.synchronise_clock()
+                self.log_status()
+                self._last_time_check = datetime.datetime.now(datetime.timezone.utc)
+            finally:
+                self.update_heartbeat_time()
+                self.max_heartbeat_age_seconds = saved_max_hb_age
 
     def html_current_status(self):
         """Return the current measurement status as html"""

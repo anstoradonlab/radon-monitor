@@ -177,7 +177,7 @@ class MonitorThread(threading.Thread):
                         if hasattr(t, "exc_info") and t.exc_info is not None:
                             try:
                                 exc_type, exc_value, exc_traceback = t.exc_info
-                                info = f"{type(exc_type)}: {exc_value} {traceback.format_tb(exc_traceback)}"
+                                info = f"{exc_type}: {exc_value} {traceback.format_tb(exc_traceback)}"
                             except Exception as ex:
                                 info = f" Failed to obtain exec_info due to error: {ex}"
                         else:
@@ -209,8 +209,7 @@ class MonitorThread(threading.Thread):
                         # not a DataThread, no need to monitor
                         continue
                     age = t.heartbeat_age
-                    max_heartbeat_age_seconds = 10
-                    if age > max_heartbeat_age_seconds:
+                    if age > t.max_heartbeat_age_seconds:
                         _logger.error(
                             f"Thread {t.name} appears to be stuck (no heartbeat for {age} seconds).  A stack trace of all threads follows:"
                         )
