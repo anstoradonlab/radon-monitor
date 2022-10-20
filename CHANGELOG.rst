@@ -46,3 +46,6 @@ XX Relese Date XX
   "Start": "2022-10-20 22:46:15+00:00", 
   "Stop": "2022-10-20 22:46:15+00:00", 
   "DetectorName": "HURD"}
+
+- Display 24h of data in the RTV (10-sec) display
+- Keep tables scrolled to the bottom in GUI, unless the user scrolls up
