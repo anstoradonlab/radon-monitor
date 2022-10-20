@@ -37,3 +37,12 @@ XX Relese Date XX
   much longer before they are identifed as having hung
 - Provide more detail in log message diagnostics
 - Fix external flow rate display (now showing mean flow rate over the last 30 minutes)
+- Users can trigger a backup/csv sync from the File menu
+- A banner display is shown at the top of the app during calibration or background
+- Write a summary message to LogMessages at the end of a complete calibration or background, e.g.
+
+  {"EventType": "Calibration", 
+  "FlushStart": "2022-10-20 22:46:15+00:00", 
+  "Start": "2022-10-20 22:46:15+00:00", 
+  "Stop": "2022-10-20 22:46:15+00:00", 
+  "DetectorName": "HURD"}

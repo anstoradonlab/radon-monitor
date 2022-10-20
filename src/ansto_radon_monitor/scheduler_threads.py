@@ -3,6 +3,7 @@ import copy
 import datetime
 import ftplib
 import functools
+import json
 import logging
 import math
 import pathlib
@@ -52,6 +53,12 @@ def approx_tstr(t: datetime.datetime):
     """
     tfmt = "%Y-%m-%d %H:%M%Z"
     return t.strftime(tfmt)
+
+def round_seconds(t: datetime.datetime) -> datetime.datetime:
+    """Round a datetime to the nearest second"""
+    if t.microsecond >= 500_000:
+        t += datetime.timedelta(seconds=1)
+    return t.replace(microsecond=0)
 
 
 def task_description(description_text):
@@ -424,15 +431,24 @@ class CalibrationUnitThread(DataThread):
         )
 
     @task_description("Calibration unit: return to idle")
-    def set_default_state(self):
+    def set_default_state(self, log_data=None):
         self._datastore.add_log_message(
             "CalibrationEvent", f"Return to normal operation"
         )
         self._run_or_reset(self._labjack.reset_all, "return to normal operation")
+        if log_data is not None:
+            json_log_data = json.dumps(log_data, default=str)
+            detector_name = log_data.get('DetectorName', None)
+            self._datastore.add_log_message("CalibrationEventSummary", json_log_data, detector_name=detector_name)
 
-    def set_nonbackground_state(self):
+    def set_nonbackground_state(self, log_data=None):
         self._datastore.add_log_message("CalibrationEvent", f"Left background state")
         self._run_or_reset(self._labjack.reset_background, "leave background state")
+        if log_data is not None:
+            json_log_data = json.dumps(log_data, default=str)
+            detector_name = log_data.get('DetectorName', None)
+            self._datastore.add_log_message("CalibrationEventSummary", json_log_data, detector_name=detector_name)
+
 
     def set_noncalibration_state(self):
         self._datastore.add_log_message("CalibrationEvent", f"Left calibration state")
@@ -508,9 +524,9 @@ class CalibrationUnitThread(DataThread):
                 )
             else:
                 initial_delay_seconds = 0
-            print(initial_delay_seconds)
             #
             # begin flushing
+            t_inj = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=initial_delay_seconds)
             self._scheduler.enter(
                 delay=initial_delay_seconds,
                 priority=p,
@@ -538,7 +554,8 @@ class CalibrationUnitThread(DataThread):
                 delay_inject_start = flush_duration + initial_delay_seconds
 
             # start injection
-            info_message = f"Expecting to start injecting radon ({self._detector_names[detector_idx]}) at: {approx_tstr(datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=delay_inject_start))}"
+            t0 = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=delay_inject_start)
+            info_message = f"Expecting to start injecting radon ({self._detector_names[detector_idx]}) at: {approx_tstr(t0)}"
             _logger.info(info_message)
             self._scheduler.enter(
                 delay=delay_inject_start,
@@ -549,12 +566,25 @@ class CalibrationUnitThread(DataThread):
 
             # stop injection
             delay_inject_stop = delay_inject_start + inject_duration
-            info_message = f"Expecting to stop injecting radon ({self._detector_names[detector_idx]}) at: {approx_tstr(datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=delay_inject_stop))}"
+            t1 = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=delay_inject_stop)
+            info_message = f"Expecting to stop injecting radon ({self._detector_names[detector_idx]}) at: {approx_tstr(t1)}"
             _logger.info(info_message)
+
+            # if the calibration event is not cancelled, this is the summary metadata which will be
+            # written to the database
+            calibration_summary = {
+                "EventType": "Calibration",
+                "FlushStart": round_seconds(t_inj),
+                "Start": round_seconds(t0),
+                "Stop": round_seconds(t1),
+                "DetectorName": self._detector_names[detector_idx],
+            }
+
             self._scheduler.enter(
                 delay=delay_inject_stop,
                 priority=p,
                 action=self.set_default_state,
+                kwargs={'log_data': calibration_summary}
             )
 
             self.state_changed.set()
@@ -596,7 +626,8 @@ class CalibrationUnitThread(DataThread):
                 initial_delay_seconds = 0
             #
             # begin background
-            info_message = f"Expecting to start background ({self._detector_names[detector_idx]}) at: {approx_tstr(datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=initial_delay_seconds))}"
+            t0 = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=initial_delay_seconds)
+            info_message = f"Expecting to start background ({self._detector_names[detector_idx]}) at: {approx_tstr(t0)}"
             _logger.info(info_message)
             self._scheduler.enter(
                 delay=initial_delay_seconds,
@@ -605,12 +636,23 @@ class CalibrationUnitThread(DataThread):
                 argument=(detector_idx,),
             )
             # reset the background flags
-            info_message = f"Expecting to stop background ({self._detector_names[detector_idx]}) at: {approx_tstr(datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=initial_delay_seconds + duration))}"
+            t1 = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=initial_delay_seconds + duration)
+            info_message = f"Expecting to stop background ({self._detector_names[detector_idx]}) at: {approx_tstr(t1)}"
+            # if the calibration event is not cancelled, this is the summary metadata which will be
+            # written to the database
+            background_summary = {
+                "EventType": "Background",
+                "Start": round_seconds(t0),
+                "Stop": round_seconds(t1),
+                "DetectorName": self._detector_names[detector_idx],
+            }
+
             _logger.info(info_message)
             self._scheduler.enter(
                 delay=initial_delay_seconds + duration,
                 priority=p,
                 action=self.set_nonbackground_state,
+                kwargs={'log_data': background_summary}
             )
 
             self.state_changed.set()
