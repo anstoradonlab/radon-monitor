@@ -1548,6 +1548,16 @@ class DataMinderThread(DataThread):
 
         # ensure that the scheduler function is run immediately on startup
         self.state_changed.set()
+    
+    def schedule_database_tasks(self, delay_seconds=0):
+        # run the database tasks once, via the scheduler
+        self._scheduler.enter(
+            delay=delay_seconds,
+            priority=0,
+            action=self.run_database_tasks,
+            kwargs={"backup_time_of_day": None,
+                    "reschedule": False},
+        )
 
     def backup_active_database(self, backup_filename=None):
         with self._backup_lock:
@@ -1598,7 +1608,8 @@ class DataMinderThread(DataThread):
             _logger.debug("Writing data to legacy file format")
             self._datastore.sync_legacy_files(data_dir)
 
-    def run_database_tasks(self, backup_time_of_day: datetime.time):
+    @task_description("Backup active database and sync csv files")
+    def run_database_tasks(self, backup_time_of_day: datetime.time=None, reschedule=True):
         # there may be a long delay (e.g. network drives), so allow
         # this routine to hang without bringing down the entire program
         with self._heartbeat_time_lock:
@@ -1616,28 +1627,29 @@ class DataMinderThread(DataThread):
         _logger.info(f"Database backup, archive, and legacy file export took {t-t0}")
         self.upload_data()
 
-        # re-schedule next backup
-        next_backup = datetime.datetime.combine(t.date(), backup_time_of_day).replace(
-            tzinfo=datetime.timezone.utc
-        )
-        if (next_backup - t).total_seconds() < 60:
-            next_backup += datetime.timedelta(days=1)
-        delay_seconds = (next_backup - t).total_seconds()
+        if reschedule:
+            # re-schedule next backup
+            next_backup = datetime.datetime.combine(t.date(), backup_time_of_day).replace(
+                tzinfo=datetime.timezone.utc
+            )
+            if (next_backup - t).total_seconds() < 60:
+                next_backup += datetime.timedelta(days=1)
+            delay_seconds = (next_backup - t).total_seconds()
 
-        _logger.info(
-            f"Next backup scheduled for {next_backup} in {delay_seconds/3600:.03} hours"
-        )
+            _logger.info(
+                f"Next backup scheduled for {next_backup} in {delay_seconds/3600:.03} hours"
+            )
 
-        self._scheduler.enter(
-            delay=delay_seconds,
-            priority=0,
-            action=self.run_database_tasks,
-            kwargs={"backup_time_of_day": backup_time_of_day},
-        )
+            self._scheduler.enter(
+                delay=delay_seconds,
+                priority=0,
+                action=self.run_database_tasks,
+                kwargs={"backup_time_of_day": backup_time_of_day},
+            )
 
         self.update_heartbeat_time()
         with self._heartbeat_time_lock:
-            self._tolerate_hang = True
+            self._tolerate_hang = False
 
 
 def sync_folder_to_ftp(

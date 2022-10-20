@@ -275,6 +275,7 @@ class MainController(object):
         # a thread to schedule backups and exports from the database
         with self._thread_list_lock:
             t = DataMinderThread(self._configuration, datastore=self.datastore)
+            self._data_minder_task = t
             self._threads.append(t)
 
         # set up a thread to monitor self
@@ -376,7 +377,7 @@ class MainController(object):
         status = {}
         detector_names = []
         for t in self._threads:
-            if t.name == "DataLoggerThread":
+            if t.name.startswith("DataLoggerThread"):
                 k = t.detectorName
                 detector_names.append(k)
             else:
@@ -413,8 +414,8 @@ class MainController(object):
         """
         jobq = []
         for t in self._threads:
-            # only report on the calibration unit
-            if t.name == "CalibrationUnitThread":
+            # only report on the calibration unit & 
+            if t.name == "CalibrationUnitThread" or t.name == "DataMinderThread":
                 jobq = t.task_queue
 
         return jobq
@@ -425,6 +426,13 @@ class MainController(object):
         """
         t = None
         return t, "Log messages not yet available"
+
+    def backup_now(self):
+        """
+        Run the backup/csv output/file upload tasks
+        """
+        self._data_minder_task.schedule_database_tasks()
+
 
     def run_calibration(
         self,
