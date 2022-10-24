@@ -28,7 +28,7 @@ Version 10.1
 
 Version 10.2
 ============
-XX Relese Date XX
+24 October 2022
 
 - Repeated attempts to re-connect to a datalogger or calibration box happen at increasing 
   intervals (starting at 30 seconds delay increasing to 5 minutes)
