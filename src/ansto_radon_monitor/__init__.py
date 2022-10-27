@@ -15,6 +15,6 @@ try:
 except PackageNotFoundError:  # pragma: no cover
     # TODO: fix this properly using the PyInstaller Spec file
     # https://github.com/pyinstaller/pyinstaller/discussions/6033
-    __version__ = "10.2"
+    __version__ = "10.3"
 finally:
     del version, PackageNotFoundError
