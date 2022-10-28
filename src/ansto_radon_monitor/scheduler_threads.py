@@ -309,6 +309,7 @@ class CalibrationUnitThread(DataThread):
         self._kind = config.calbox.kind
         self._num_detectors = len(config.detectors)
         self._detector_names = [itm.name for itm in config.detectors]
+        self._radon_source_activity_bq = config.calbox.radon_source_activity_bq
 
         # lower numbers are higher priority
         # task priority is *also* used to identify tasks later, so that
@@ -578,6 +579,7 @@ class CalibrationUnitThread(DataThread):
                 "Start": round_seconds(t0),
                 "Stop": round_seconds(t1),
                 "DetectorName": self._detector_names[detector_idx],
+                "SourceActivity": self._radon_source_activity_bq
             }
 
             self._scheduler.enter(
