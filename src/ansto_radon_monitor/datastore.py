@@ -2,6 +2,7 @@
 import csv
 import datetime
 import logging
+import math
 import os
 import pathlib
 import shutil
@@ -1350,7 +1351,7 @@ class DataStore(object):
         ]
         colnames_quoted = [f'"{itm}"' for itm in colnames]
 
-        def format_rec(row, headers=False, tz_offset=datetime.timedelta(seconds=0)):
+        def format_rec(row, headers=False, tz_offset=datetime.timedelta(seconds=0), with_radon=True, cal=.2, bg_cps=1/60.0):
             """format a row, if headers is True then format for headers
 
             The format is intended to match this:
@@ -1369,6 +1370,8 @@ class DataStore(object):
                         if itm.endswith("_Tot") or itm.endswith("_Avg"):
                             itm = itm[:-4]
                         output.append(itm)
+                if with_radon:
+                    output.append("ApproxRadon")
                 output_str = ", ".join(output)
                 # two spaces after 'Time' in the headers
                 output_str.replace("Time, ", "Time,  ")
@@ -1386,6 +1389,13 @@ class DataStore(object):
                         output.append(str(itm))
                     else:
                         output.append("")
+                if with_radon:
+                    try:
+                        cps = row['LLD_Tot'] / 30.0 / 60.0
+                        ApproxRadon = (cps - bg_cps) / cal
+                    except:
+                        ApproxRadon = math.nan
+                    output.append(str(ApproxRadon))
                 output_str = ", ".join(output)
                 # match the quirk of the comment column
                 output_str = output_str.replace(", ,", ",,")
@@ -1406,6 +1416,8 @@ class DataStore(object):
             # what if config has changed?
             for detector_config in self._config.detectors:
                 detector_name = detector_config.name
+                cal = self.get_state(detector_name + " sensitivity")
+                bg_cps = self.get_state(detector_name + " background cps")
                 exec_t0 = datetime.datetime.now(datetime.timezone.utc)
                 sql = (
                     f"SELECT {','.join(colnames_quoted)} from Results LEFT OUTER JOIN detector_names ON Results.DetectorName=detector_names.id "
@@ -1476,10 +1488,10 @@ class DataStore(object):
                         os.makedirs(dirname)
 
                     with open(fname, "wt") as fd:
-                        fd.write(format_rec(data[0], headers=True))
+                        fd.write(format_rec(data[0], headers=True, with_radon=True))
                         fd.write("\n")
                         for row in data:
-                            fd.write(format_rec(row, headers=False, tz_offset=tz_offset))
+                            fd.write(format_rec(row, headers=False, tz_offset=tz_offset, cal=cal, bg_cps=bg_cps, with_radon=True))
                             fd.write("\n")
 
     def shutdown(self):

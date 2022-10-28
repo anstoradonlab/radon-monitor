@@ -960,7 +960,7 @@ class DataLoggerThread(DataThread):
         detector_volume = detector_volumes.get(detector_config.kind, 1.0)
         default_cal = 0.2 * detector_volume
         default_bg_cps = 100.0/30.0/60.0 * 7 if detector_config.kind == "L5000" else 100.0/30.0/60.0
-        k = self.detectorName + " calibration coefficient"
+        k = self.detectorName + " sensitivity"
         cal = self._datastore.get_state(k)
         if cal is None:
             self._datastore.set_state(k, default_cal)
