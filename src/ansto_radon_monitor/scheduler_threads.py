@@ -955,6 +955,20 @@ class DataLoggerThread(DataThread):
             kwargs={"detector_config": detector_config},
         )
 
+        # set default values for cal and bg coefficients in persistent state
+        detector_volumes = {"L100":0.1,"L200":0.2,"L1500":1.5,"L5000":5.0}
+        detector_volume = detector_volumes.get(detector_config.kind, 1.0)
+        default_cal = 0.2 * detector_volume
+        default_bg_cps = 100.0/30.0/60.0 * 7 if detector_config.kind == "L5000" else 100.0/30.0/60.0
+        k = self.detectorName + " calibration coefficient"
+        cal = self._datastore.get_state(k)
+        if cal is None:
+            self._datastore.set_state(k, default_cal)
+        k = self.detectorName + " background cps"
+        bg = self._datastore.get_state(k)
+        if bg is None:
+            self._datastore.set_state(k, default_bg_cps)
+
         # ensure that the scheduler function is run immediately on startup
         self.state_changed.set()
 
