@@ -1314,7 +1314,8 @@ class DataStore(object):
          - assume that locking is taken care by the caller
          - the file name pattern is defined by configuration options
         """
-
+        # report a conversion error only for the first item
+        report_conversion_error = True
         if data_dir is None:
             data_dir = self._config.data_dir
 
@@ -1359,6 +1360,7 @@ class DataStore(object):
                 2020, 306,11,01,00:00, 45.42, 681, 8.12, 578.9, 2126, 1400, 0, 18.17, 34.56, 23.87, 63.83, 1009.168, 13.73,, 0
 
             """
+            nonlocal report_conversion_error
             output = []
             if headers:
                 for itm in row.keys():
@@ -1393,8 +1395,12 @@ class DataStore(object):
                     try:
                         cps = row['LLD_Tot'] / 30.0 / 60.0
                         ApproxRadon = (cps - bg_cps) / cal
-                    except:
+                    except Exception as ex:
                         ApproxRadon = math.nan
+                        if report_conversion_error:
+                            _logger.error(f"Error calculating radon from at least one row: \"{ex}\" cal: {cal}, bg: {bg_cps}, row: {dict(row)}")
+                            report_conversion_error = False
+
                     output.append(str(ApproxRadon))
                 output_str = ", ".join(output)
                 # match the quirk of the comment column
@@ -1416,8 +1422,8 @@ class DataStore(object):
             # what if config has changed?
             for detector_config in self._config.detectors:
                 detector_name = detector_config.name
-                cal = self.get_state(detector_name + " sensitivity")
-                bg_cps = self.get_state(detector_name + " background cps")
+                cal = float(self.get_state(detector_name + " sensitivity"))
+                bg_cps = float(self.get_state(detector_name + " background cps"))
                 exec_t0 = datetime.datetime.now(datetime.timezone.utc)
                 sql = (
                     f"SELECT {','.join(colnames_quoted)} from Results LEFT OUTER JOIN detector_names ON Results.DetectorName=detector_names.id "
