@@ -296,19 +296,33 @@ class MainController(object):
         """
         self.datastore.add_log_message("SystemEvent", "Shutdown")
         self._shutting_down = True
-        _logger.debug("Asking threads to shut down.")
+        _logger.info("Asking threads to shut down.")
+        wait_list = []
         for itm in self._threads:
-            itm.shutdown()
-        _logger.debug("Shutting down datastore.")
+            if not itm.name == "MonitorThread":
+                itm.shutdown()
+                wait_list.append(itm)
+        for itm in wait_list:
+            _logger.info(f"Waiting for {itm.name}")
+            itm.join()
+
+        _logger.info("Shutting down datastore.")
+        # this, the datastore, is in the main thread.  We're just closing the database.
         self.datastore.shutdown()
-        _logger.debug("Waiting for threads...")
-        if (threading.main_thread()).ident == threading.get_ident():
-            # TODO: decide what *should* happen if shutdown is called from a thread other than the main one
-            for itm in self._threads:
-                # only call join for active threads
-                if itm in threading.enumerate():
-                    itm.join()
-        _logger.debug("Finished waiting for threads.")
+
+        # finally, shut down the MonitorThread
+        for itm in self._threads:
+            if itm.name == "MonitorThread":
+                itm.shutdown()
+                _logger.info(f"Waiting for {itm.name}")
+                itm.join()
+
+        _logger.info("All threads have finished shutting down.")
+        # check for active threads which should not be present
+        for itm in threading.enumerate():
+            if not (threading.main_thread()).ident == threading.get_ident():
+                _logger.error(f"A thread is still alive after shutdown: {itm}")
+        
 
     def shutdown_and_exit(self):
         """
