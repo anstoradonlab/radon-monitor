@@ -157,6 +157,8 @@ class MonitorThread(threading.Thread):
         self.status = ""  # nothing to report unless things all go bad!
         self.cancelled = False
         self.state_changed = threading.Event()
+        self.poll_interval = 10
+        self._shutdown_detected = False
 
     def shutdown(self):
         self.cancelled = True
@@ -164,9 +166,16 @@ class MonitorThread(threading.Thread):
 
     def run(self):
         while True:
-            self.state_changed.wait(timeout=10)
+            self.state_changed.wait(timeout=self.poll_interval)
             if self.cancelled:
                 return
+            if not self._shutdown_detected and self._main_controller._shutting_down:
+                # at this point the main controller is shutting
+                # down.  Take a break from monitoring and check back later
+                self._shutdown_detected = True
+                self.poll_interval = 60 * 3
+                continue
+
             fail_count = 0
             #
             # ... check for stopped threads
