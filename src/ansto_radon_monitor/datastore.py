@@ -103,6 +103,9 @@ class LatestRowToken(object):
         else:
             self.t = t
             self.latest_rowid = latest_rowid
+    
+    def __str__(self):
+        return f"LatestRowToken(latest_rowid = {self.latest_rowid}, t = {self.t})"
 
 
 # TODO: reorganise + clean up
@@ -896,7 +899,7 @@ class DataStore(object):
         self,
         table_name,
         start_time: Union[datetime.datetime, LatestRowToken],
-        maxrows=1000,
+        maxrows=86400*10,
         recent=True,
     ):
         """
