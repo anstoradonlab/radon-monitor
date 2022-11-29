@@ -899,7 +899,7 @@ class DataStore(object):
         self,
         table_name,
         start_time: Union[datetime.datetime, LatestRowToken],
-        maxrows=86400*10,
+        maxrows=600*24*10,
         recent=True,
     ):
         """
