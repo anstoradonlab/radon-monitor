@@ -1586,6 +1586,8 @@ class DataMinderThread(DataThread):
         self._backup_lock = threading.RLock()
         self._csv_output_lock = threading.RLock()
 
+        self.run_sync_csv_files(reschedule=True)
+
         # perform some tasks a short time after startup
         backup_time_of_day = config.backup_time_of_day
         delay_seconds = 10 * 60
@@ -1665,6 +1667,33 @@ class DataMinderThread(DataThread):
         with self._csv_output_lock:
             _logger.debug("Writing data to legacy file format")
             self._datastore.sync_legacy_files(data_dir)
+
+    @task_description("Sync csv files")
+    def run_sync_csv_files(self, reschedule=True):
+        """
+        Sync the csv files and re-schedule
+        """
+        # there may be a long delay (e.g. network drives), so allow
+        # this routine to hang without bringing down the entire program
+        with self._heartbeat_time_lock:
+            self._tolerate_hang = True
+        self.sync_legacy_files(data_dir=self._config.data_dir)
+
+        if reschedule:
+            # re-schedule next sync at 15 sec after 30 minute interval
+            delay_seconds = next_interval(time.time(), interval=30*60, offset=15)
+
+            self._scheduler.enter(
+                delay=delay_seconds,
+                priority=0,
+                action=self.run_sync_csv_files,
+                kwargs={"reschedule": True},
+            )
+
+        self.update_heartbeat_time()
+        with self._heartbeat_time_lock:
+            self._tolerate_hang = False
+
 
     @task_description("Backup active database and sync csv files")
     def run_database_tasks(self, backup_time_of_day: datetime.time=None, reschedule=True):
