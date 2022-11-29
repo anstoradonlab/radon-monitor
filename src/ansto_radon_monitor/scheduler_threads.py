@@ -87,9 +87,9 @@ def next_interval(sec, interval, offset=0.0):
 
     Parameters
     ----------
-    sec : type returned by time.time()
+    sec : float, as e.g. returned by time.time()
         now
-    interval : [type]
+    interval : float
         interval length (seconds)
     offset : float, optional
         offset for first interval, e.g. if interval is 10.0 and offset is 1.0,
@@ -100,8 +100,7 @@ def next_interval(sec, interval, offset=0.0):
     float
         time until next interval expires
     """
-    # TODO: handle the offset (check it is getting used first)
-    return (math.ceil(sec / interval) * interval) - sec
+    return (math.ceil((sec - offset) / interval) * interval) - (sec - offset)
 
 
 class DataThread(threading.Thread):
