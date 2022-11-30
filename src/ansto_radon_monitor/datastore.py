@@ -708,14 +708,19 @@ class DataStore(object):
                     ]
                 )
                 with self._update_time_lock:
-                    current_max_time = self._table_update_time.get(k, None)
-                    if current_max_time is None or data_max_time > current_max_time:
-                        self._table_update_time[k] = data_max_time
-                    else:
-                        if current_max_time is not None:
-                            _logger.warning(
-                                f"Duplicate data may have been sent to database, likely because of a programming error.  File: {self.data_file}, table: {table_name}."
-                            )
+                    k1 = k
+                    # also update the update time for detector_name=None (max time for all detectors)
+                    k2 = (self.data_file, table_name, None)
+                    for k in (k1,k2):
+                        current_max_time = self._table_update_time.get(k, None)
+                        if current_max_time is None or data_max_time > current_max_time:
+                            self._table_update_time[k] = data_max_time
+                        else:
+                            if current_max_time is not None and k[2] is not None:
+                                # the times in data from one detector should not be able to go backwards in time
+                                _logger.warning(
+                                    f"Duplicate data may have been sent to database, likely because of a programming error, or clocks may have changed.  File: {self.data_file}, table: {table_name}."
+                                )
 
     def _get_table_names_from_disk(self, has_datetime=None):
         try:
