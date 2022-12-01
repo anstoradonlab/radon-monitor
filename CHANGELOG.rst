@@ -49,3 +49,14 @@ Version 10.2
 
 - Display 24h of data in the RTV (10-sec) display
 - Keep tables scrolled to the bottom in GUI, unless the user scrolls up
+
+Version 10.3
+============
+1 December 2022
+
+- Add source activity to calibration metadata
+- Add ApproxRadon column to csv output (no GUI yet - relies on manually setting cal/bg in 'persistent_state' table in database)
+- Improve behaviour during shutdown, avoiding a hang
+- Sync csv output every 30 minutes
+- Fix issue where CSV files stopped updating at end of month
+- Improve plotting and slightly adjust labels to fit better on small screens
