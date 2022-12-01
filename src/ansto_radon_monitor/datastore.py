@@ -79,7 +79,7 @@ def iter_months(tmin, tmax):
     """
     y = tmin.year
     m = tmin.month
-    while y < tmax.year or m <= tmax.month:
+    while y < tmax.year or (y <= tmax.year and m <= tmax.month):
         yield y, m
         y, m = next_year_month(y, m)
 
@@ -1332,8 +1332,10 @@ class DataStore(object):
         tz_offset = datetime.timedelta(
             seconds=int(self._config.legacy_file_timezone * 3600)
         )
-        tmin_local = self.get_minimum_time(table_name) - tz_offset
-        tmax_local = self.get_update_time(table_name, None) - tz_offset
+        # these are the maximum and minimum times in the database, converted into 
+        # local time (defined as the timezone for the legacy csv output files)
+        tmin_local = self.get_minimum_time(table_name) + tz_offset
+        tmax_local = self.get_update_time(table_name, None) + tz_offset
 
         # define month names statically to prevent any interction with user's
         # local settings (from list(calendar.month_abbr) )
