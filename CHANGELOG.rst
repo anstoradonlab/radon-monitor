@@ -60,3 +60,8 @@ Version 10.3
 - Sync csv output every 30 minutes
 - Fix issue where CSV files stopped updating at end of month
 - Improve plotting and slightly adjust labels to fit better on small screens
+
+Version 10.4
+============
+not yet released
+
