@@ -1032,11 +1032,42 @@ class DataStore(object):
                 data = [conv_date(itm) for itm in data]
             t_token = LatestRowToken(t, rowid_max)
 
+        if table_name == "Results":
+            data = self._calculate_approx_radon(data, dt=30.0*60.0)
+
         _logger.debug(
             f"Loading data (rows: {len(data)}, table: {view_name}, start time: {start_time}, max_t_token: {t_token}) took: {datetime.datetime.now(datetime.timezone.utc)-t0}"
         )
 
         return t_token, data
+    
+    def _calculate_approx_radon(self, data, dt=30.0*60.0):
+        report_conversion_error = True
+        conv_data = []
+        caldict = {}
+        bgdict = {}
+        for row in data:
+
+            detector_name = row['DetectorName']
+            if not detector_name in caldict:
+                caldict[detector_name] = float(self.get_state(detector_name + " sensitivity"))
+                bgdict[detector_name] = float(self.get_state(detector_name + " background cps"))
+            cal = caldict[detector_name]
+            bg_cps = bgdict[detector_name]
+
+            try:
+                cps = row['LLD_Tot'] / dt
+                ApproxRadon = (cps - bg_cps) / cal
+            except Exception as ex:
+                ApproxRadon = math.nan
+                if report_conversion_error:
+                    _logger.error(f"Error calculating radon from at least one row: \"{ex}\" cal: {cal}, bg: {bg_cps}, row: {dict(row)}")
+                    report_conversion_error = False
+            row['ApproxRadon'] = ApproxRadon
+
+            conv_data.append(row)
+        
+        return conv_data
 
     def get_archive_filename(self, data_dir, y, m):
         fname = os.path.abspath(
@@ -1401,17 +1432,17 @@ class DataStore(object):
                         output.append(str(itm))
                     else:
                         output.append("")
-                if with_radon:
-                    try:
-                        cps = row['LLD_Tot'] / 30.0 / 60.0
-                        ApproxRadon = (cps - bg_cps) / cal
-                    except Exception as ex:
-                        ApproxRadon = math.nan
-                        if report_conversion_error:
-                            _logger.error(f"Error calculating radon from at least one row: \"{ex}\" cal: {cal}, bg: {bg_cps}, row: {dict(row)}")
-                            report_conversion_error = False
+                # if with_radon:
+                #     try:
+                #         cps = row['LLD_Tot'] / 30.0 / 60.0
+                #         ApproxRadon = (cps - bg_cps) / cal
+                #     except Exception as ex:
+                #         ApproxRadon = math.nan
+                #         if report_conversion_error:
+                #             _logger.error(f"Error calculating radon from at least one row: \"{ex}\" cal: {cal}, bg: {bg_cps}, row: {dict(row)}")
+                #             report_conversion_error = False
 
-                    output.append(str(ApproxRadon))
+                #     output.append(str(ApproxRadon))
                 output_str = ", ".join(output)
                 # match the quirk of the comment column
                 output_str = output_str.replace(", ,", ",,")
