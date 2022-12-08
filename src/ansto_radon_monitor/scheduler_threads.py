@@ -30,6 +30,7 @@ from ansto_radon_monitor.html import status_as_html
 _logger = logging.getLogger()
 
 from .labjack_interface import CalBoxLabjack, CapeGrimLabjack
+from .burkert_gateway import BurkertGateway
 from .configuration import DetectorConfig
 
 
@@ -303,12 +304,13 @@ class CalibrationUnitThread(DataThread):
         # inside )
         super().__init__(datastore, *args, **kwargs)
         self.name = "CalibrationUnitThread"
-        self._labjack = None
+        self._device = None
         self._data_table_name = "CalibrationUnit"
         self._kind = config.calbox.kind
         self._num_detectors = len(config.detectors)
         self._detector_names = [itm.name for itm in config.detectors]
         self._radon_source_activity_bq = config.calbox.radon_source_activity_bq
+        self._ip_address = config.me43_ip_address
 
         # lower numbers are higher priority
         # task priority is *also* used to identify tasks later, so that
@@ -324,7 +326,7 @@ class CalibrationUnitThread(DataThread):
         if config.calbox.kind == "mock":
             labjack_id = None
 
-        self._schedule_connection(labjack_id, serialNumber, delay=0)
+        self._schedule_connection(labjack_id, serialNumber, config.me43_ip_address, delay=0)
 
         # ensure that the scheduler function is run immediately on startup
         self.state_changed.set()
@@ -340,31 +342,36 @@ class CalibrationUnitThread(DataThread):
         self._cancel_tasks(self._background_tasks_priority)
         self._cancel_tasks(self._connection_task_priority)
 
-        self._labjack = None
+        self._device = None
         self._scheduler.enter(
             delay=delay,
             priority=self._connection_task_priority,  # high priority - needs to happend before anything else will work
-            action=self.connect_to_labjack,
+            action=self.connect_to_device,
             kwargs={"labjack_id": labjack_id, "serialNumber": serialNumber},
         )
 
     @task_description("Calibration unit: initialize")
-    def connect_to_labjack(self, labjack_id, serialNumber):
+    def connect_to_device(self, labjack_id, serialNumber, ip_address=""):
         self._thread_ident = threading.get_ident()
         with self._lock:
             try:
                 if self._kind == "mock":
-                    self._labjack = CalBoxLabjack(
+                    self._device = CalBoxLabjack(
                         labjack_id=None, serialNumber=serialNumber
                     )
                 elif self._kind == "generic":
-                    self._labjack = CalBoxLabjack(labjack_id, serialNumber=serialNumber)
+                    self._device = CalBoxLabjack(labjack_id, serialNumber=serialNumber)
                 elif self._kind == "CapeGrim":
-                    self._labjack = CapeGrimLabjack(
+                    self._device = CapeGrimLabjack(
                         labjack_id, serialNumber=serialNumber
                     )
+                elif self._kind == "burkertModel1":
+                    self._device = BurkertGateway(ip_address=ip_address)
+                elif self._kind == "none":
+                    self._device = None
+                    raise NotImplementedError("Still need to write support for no calibration unit")
                 elif self._kind == "mockCapeGrim":
-                    self._labjack = CapeGrimLabjack(
+                    self._device = CapeGrimLabjack(
                         labjack_id=None, serialNumber=serialNumber
                     )
                 else:
@@ -375,16 +382,16 @@ class CalibrationUnitThread(DataThread):
                 self._reconnect_delay = 30
             except Exception as ex:
                 self._reconnect_delay = min(self._reconnect_delay*2, 300)
-                self._schedule_connection(labjack_id, serialNumber, delay=self._reconnect_delay)
+                self._schedule_connection(labjack_id, serialNumber, ip_address, delay=self._reconnect_delay)
                 _logger.error(
-                    "Unable to connect to calibration system LabJack using "
-                    f"ID: {labjack_id} serial: {serialNumber} because of error: {ex}.  Retrying in {self._reconnect_delay}sec."
+                    "Unable to connect to calibration system using "
+                    f"ID: {labjack_id} serial: {serialNumber} ip address: {ip_address} because of error: {ex}.  Retrying in {self._reconnect_delay}sec."
                 )
 
     @task_description("Calibration unit: flush source")
     def set_flush_state(self):
         try:
-            self._labjack.flush()
+            self._device.flush()
             self._datastore.add_log_message(
                 "CalibrationEvent", f"Began flushing radon calibration source"
             )
@@ -414,7 +421,7 @@ class CalibrationUnitThread(DataThread):
             detector_name=self._detector_names[detector_idx],
         )
         self._run_or_reset(
-            self._labjack.inject, "begin source injection", argument=(detector_idx,)
+            self._device.inject, "begin source injection", argument=(detector_idx,)
         )
 
     @task_description("Calibration unit: switch to background state")
@@ -425,7 +432,7 @@ class CalibrationUnitThread(DataThread):
             detector_name=self._detector_names[detector_idx],
         )
         self._run_or_reset(
-            self._labjack.start_background,
+            self._device.start_background,
             "enter background state",
             argument=(detector_idx,),
         )
@@ -435,7 +442,7 @@ class CalibrationUnitThread(DataThread):
         self._datastore.add_log_message(
             "CalibrationEvent", f"Return to normal operation"
         )
-        self._run_or_reset(self._labjack.reset_all, "return to normal operation")
+        self._run_or_reset(self._device.reset_all, "return to normal operation")
         if log_data is not None:
             json_log_data = json.dumps(log_data, default=str)
             detector_name = log_data.get('DetectorName', None)
@@ -443,7 +450,7 @@ class CalibrationUnitThread(DataThread):
 
     def set_nonbackground_state(self, log_data=None):
         self._datastore.add_log_message("CalibrationEvent", f"Left background state")
-        self._run_or_reset(self._labjack.reset_background, "leave background state")
+        self._run_or_reset(self._device.reset_background, "leave background state")
         if log_data is not None:
             json_log_data = json.dumps(log_data, default=str)
             detector_name = log_data.get('DetectorName', None)
@@ -452,15 +459,15 @@ class CalibrationUnitThread(DataThread):
 
     def set_noncalibration_state(self):
         self._datastore.add_log_message("CalibrationEvent", f"Left calibration state")
-        self._run_or_reset(self._labjack.reset_calibration, "leave calibration state")
+        self._run_or_reset(self._device.reset_calibration, "leave calibration state")
 
     def measurement_func(self):
         t = datetime.datetime.now(datetime.timezone.utc)
         t = t.replace(microsecond=0)
         data = {"Datetime": t}
-        if self._labjack is not None:
-            data.update(self._labjack.analogue_states)
-            data.update(self._labjack.digital_output_state)
+        if self._device is not None:
+            data.update(self._device.analogue_states)
+            data.update(self._device.digital_output_state)
 
             # update data cache (for properties)
             self._data = data
@@ -795,12 +802,12 @@ class CalibrationUnitThread(DataThread):
 
     @property
     def status(self):
-        if self._labjack is None:
+        if self._device is None:
             status = {}
             status["message"] = "no connection"
         else:
             if threading.get_ident() == self._thread_ident:
-                status = self._labjack.status
+                status = self._device.status
                 self._status_cache = status
             else:
                 # use the cache if we are not inside the thread

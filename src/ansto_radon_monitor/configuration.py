@@ -83,6 +83,7 @@ class CalUnitConfig:
     kind: str = ""
     labjack_id: typing.Optional[int] = -1
     labjack_serial: int = -1
+    me43_ip_address: str = "192.168.0.100"
     flush_duration_sec: int = 3600 * 12
     inject_duration_sec: int = 3600 * 6
     background_duration_sec: int = 3600 * 24
