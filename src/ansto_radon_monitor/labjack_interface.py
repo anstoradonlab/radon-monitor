@@ -9,6 +9,8 @@ from typing import List
 
 import u12
 
+from .calbox_device import CalboxDevice
+
 _logger = logging.getLogger(__name__)
 
 # reference for Labjack interface:
@@ -247,7 +249,7 @@ class LabjackWrapper:
         return serial_no
 
 
-class CalBoxLabjack:
+class CalBoxLabjack(CalboxDevice):
     """Hardware interface for the labjack inside our Cal Box.
 
     Note: this is intended to be thread-safe

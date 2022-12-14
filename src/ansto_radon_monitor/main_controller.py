@@ -323,8 +323,11 @@ class MainController(object):
         for itm in self._threads:
             if itm.name == "MonitorThread":
                 itm.shutdown()
-                _logger.info(f"Waiting for {itm.name}")
-                itm.join()
+                if not threading.current_thread() is itm:
+                    # it's possible to call shutdown from MonitorThread, so don't wait 
+                    # on the current thread
+                    _logger.info(f"Waiting for {itm.name}")
+                    itm.join()
 
         _logger.info("All threads have finished shutting down.")
         # check for active threads which should not be present

@@ -30,6 +30,7 @@ from ansto_radon_monitor.html import status_as_html
 _logger = logging.getLogger()
 
 from .labjack_interface import CalBoxLabjack, CapeGrimLabjack
+from .burkert_gateway import BurkertGateway
 from .configuration import DetectorConfig
 
 
@@ -266,7 +267,7 @@ class DataThread(threading.Thread):
             self.shutdown_func()
         except Exception as ex:
             _logger.error(
-                f'{self.name} is aborting with an unhandled exception: "{ex}". Stack trace for all threads follows.'
+                f'{self.name} is aborting with an unhandled exception: "{ex}". \n{traceback.format_exc()}\nStack trace for all threads follows.'
             )
             for th in threading.enumerate():
                 _logger.error(f"Thread {th}")
@@ -303,12 +304,14 @@ class CalibrationUnitThread(DataThread):
         # inside )
         super().__init__(datastore, *args, **kwargs)
         self.name = "CalibrationUnitThread"
-        self._labjack = None
+        self._device = None
         self._data_table_name = "CalibrationUnit"
         self._kind = config.calbox.kind
         self._num_detectors = len(config.detectors)
         self._detector_names = [itm.name for itm in config.detectors]
         self._radon_source_activity_bq = config.calbox.radon_source_activity_bq
+        self._ip_address = config.calbox.me43_ip_address
+        self._flush_flow_rate = config.calbox.flush_flow_rate
 
         # lower numbers are higher priority
         # task priority is *also* used to identify tasks later, so that
@@ -324,7 +327,7 @@ class CalibrationUnitThread(DataThread):
         if config.calbox.kind == "mock":
             labjack_id = None
 
-        self._schedule_connection(labjack_id, serialNumber, delay=0)
+        self._schedule_connection(labjack_id, serialNumber, self._ip_address, self._flush_flow_rate, delay=0)
 
         # ensure that the scheduler function is run immediately on startup
         self.state_changed.set()
@@ -334,57 +337,62 @@ class CalibrationUnitThread(DataThread):
             if itm.priority == task_priority:
                 self._scheduler.cancel(itm)
 
-    def _schedule_connection(self, labjack_id, serialNumber, delay=10):
+    def _schedule_connection(self, labjack_id, serialNumber, ip_address="", flush_flow_rate=None, delay=10):
         # cancel any current cal/bg tasks
         self._cancel_tasks(self._calibration_tasks_priority)
         self._cancel_tasks(self._background_tasks_priority)
         self._cancel_tasks(self._connection_task_priority)
 
-        self._labjack = None
+        self._device = None
         self._scheduler.enter(
             delay=delay,
             priority=self._connection_task_priority,  # high priority - needs to happend before anything else will work
-            action=self.connect_to_labjack,
-            kwargs={"labjack_id": labjack_id, "serialNumber": serialNumber},
+            action=self.connect_to_device,
+            kwargs={"labjack_id": labjack_id, "serialNumber": serialNumber, "ip_address":ip_address, "flush_flow_rate":flush_flow_rate},
         )
 
     @task_description("Calibration unit: initialize")
-    def connect_to_labjack(self, labjack_id, serialNumber):
+    def connect_to_device(self, labjack_id, serialNumber, ip_address, flush_flow_rate):
         self._thread_ident = threading.get_ident()
         with self._lock:
             try:
                 if self._kind == "mock":
-                    self._labjack = CalBoxLabjack(
+                    self._device = CalBoxLabjack(
                         labjack_id=None, serialNumber=serialNumber
                     )
                 elif self._kind == "generic":
-                    self._labjack = CalBoxLabjack(labjack_id, serialNumber=serialNumber)
+                    self._device = CalBoxLabjack(labjack_id, serialNumber=serialNumber)
                 elif self._kind == "CapeGrim":
-                    self._labjack = CapeGrimLabjack(
+                    self._device = CapeGrimLabjack(
                         labjack_id, serialNumber=serialNumber
                     )
+                elif self._kind == "burkertModel1":
+                    self._device = BurkertGateway(ip_address=ip_address, flush_flow_rate=flush_flow_rate)
+                elif self._kind == "none":
+                    self._device = None
+                    raise NotImplementedError("Still need to write support for no calibration unit")
                 elif self._kind == "mockCapeGrim":
-                    self._labjack = CapeGrimLabjack(
+                    self._device = CapeGrimLabjack(
                         labjack_id=None, serialNumber=serialNumber
                     )
                 else:
                     _logger.error(
-                        f"Unknown kind of calibration unit: {self._kind}.  Known kinds are: ['generic', 'CapeGrim', 'mock', 'mockCapeGrim]"
+                        f"Unknown kind of calibration unit: {self._kind}.  Known kinds are: ['generic', 'burkertModel1', 'CapeGrim', 'mock', 'mockCapeGrim]"
                     )
                 # no exception - set the reconnect delay to default
                 self._reconnect_delay = 30
             except Exception as ex:
                 self._reconnect_delay = min(self._reconnect_delay*2, 300)
-                self._schedule_connection(labjack_id, serialNumber, delay=self._reconnect_delay)
+                self._schedule_connection(labjack_id, serialNumber, ip_address=ip_address, flush_flow_rate=flush_flow_rate, delay=self._reconnect_delay)
                 _logger.error(
-                    "Unable to connect to calibration system LabJack using "
-                    f"ID: {labjack_id} serial: {serialNumber} because of error: {ex}.  Retrying in {self._reconnect_delay}sec."
+                    "Unable to connect to calibration system using "
+                    f"ID: {labjack_id} serial: {serialNumber} ip address: {ip_address} because of error: {ex}.  Retrying in {self._reconnect_delay}sec."
                 )
 
     @task_description("Calibration unit: flush source")
     def set_flush_state(self):
         try:
-            self._labjack.flush()
+            self._device.flush()
             self._datastore.add_log_message(
                 "CalibrationEvent", f"Began flushing radon calibration source"
             )
@@ -402,9 +410,10 @@ class CalibrationUnitThread(DataThread):
         except Exception as ex:
             _logger.error(
                 f"Unable to {description} "
-                f" because of error: {ex}.  Attempting to reconnect and reset in 10sec."
+                f" because of error: {ex}.  Attempting to reconnect and reset."
             )
-            self._schedule_connection(self._init_labjack_id, self._init_serialNumber)
+            self._device = None
+            self._schedule_connection(self._init_labjack_id, self._init_serialNumber, self._ip_address, self._flush_flow_rate)
 
     @task_description("Calibration unit: inject from source")
     def set_inject_state(self, detector_idx=0):
@@ -414,7 +423,7 @@ class CalibrationUnitThread(DataThread):
             detector_name=self._detector_names[detector_idx],
         )
         self._run_or_reset(
-            self._labjack.inject, "begin source injection", argument=(detector_idx,)
+            self._device.inject, "begin source injection", argument=(detector_idx,)
         )
 
     @task_description("Calibration unit: switch to background state")
@@ -425,7 +434,7 @@ class CalibrationUnitThread(DataThread):
             detector_name=self._detector_names[detector_idx],
         )
         self._run_or_reset(
-            self._labjack.start_background,
+            self._device.start_background,
             "enter background state",
             argument=(detector_idx,),
         )
@@ -435,7 +444,7 @@ class CalibrationUnitThread(DataThread):
         self._datastore.add_log_message(
             "CalibrationEvent", f"Return to normal operation"
         )
-        self._run_or_reset(self._labjack.reset_all, "return to normal operation")
+        self._run_or_reset(self._device.reset_all, "return to normal operation")
         if log_data is not None:
             json_log_data = json.dumps(log_data, default=str)
             detector_name = log_data.get('DetectorName', None)
@@ -443,7 +452,7 @@ class CalibrationUnitThread(DataThread):
 
     def set_nonbackground_state(self, log_data=None):
         self._datastore.add_log_message("CalibrationEvent", f"Left background state")
-        self._run_or_reset(self._labjack.reset_background, "leave background state")
+        self._run_or_reset(self._device.reset_background, "leave background state")
         if log_data is not None:
             json_log_data = json.dumps(log_data, default=str)
             detector_name = log_data.get('DetectorName', None)
@@ -452,15 +461,15 @@ class CalibrationUnitThread(DataThread):
 
     def set_noncalibration_state(self):
         self._datastore.add_log_message("CalibrationEvent", f"Left calibration state")
-        self._run_or_reset(self._labjack.reset_calibration, "leave calibration state")
+        self._run_or_reset(self._device.reset_calibration, "leave calibration state")
 
     def measurement_func(self):
         t = datetime.datetime.now(datetime.timezone.utc)
         t = t.replace(microsecond=0)
         data = {"Datetime": t}
-        if self._labjack is not None:
-            data.update(self._labjack.analogue_states)
-            data.update(self._labjack.digital_output_state)
+        if self._device is not None:
+            data.update(self._device.analogue_states)
+            data.update(self._device.digital_output_state)
 
             # update data cache (for properties)
             self._data = data
@@ -795,12 +804,12 @@ class CalibrationUnitThread(DataThread):
 
     @property
     def status(self):
-        if self._labjack is None:
+        if self._device is None:
             status = {}
             status["message"] = "no connection"
         else:
             if threading.get_ident() == self._thread_ident:
-                status = self._labjack.status
+                status = self._device.status
                 self._status_cache = status
             else:
                 # use the cache if we are not inside the thread
@@ -944,7 +953,7 @@ class DataLoggerThread(DataThread):
         # set this to a long time ago
         self._last_time_check = datetime.datetime.min
         # buffer for last 30 minutes of 10-second (RTV) measurements
-        self._rtv_buffer = collections.deque(maxlen=30 * 6)
+        self._rtv_buffer: collections.deque = collections.deque(maxlen=30 * 6)
         self._fill_rtv_buffer()
 
         self._scheduler.enter(
@@ -1619,13 +1628,22 @@ class DataMinderThread(DataThread):
         )
 
     def backup_active_database(self, backup_filename=None):
-        with self._backup_lock:
-            self._datastore.backup_active_database(backup_filename)
+        try:
+            with self._backup_lock:
+                self._datastore.backup_active_database(backup_filename)
+        except Exception as ex:
+            _logger.error(f"Error backing up active database: {ex}, {traceback.format_exc()}")
+            raise
 
     def archive_data(self, data_dir):
-        with self._backup_lock:
-            _logger.debug(f"Archiving old records from active database")
-            self._datastore.archive_data(data_dir=self._config.data_dir)
+        try:
+            with self._backup_lock:
+                _logger.debug(f"Archiving old records from active database")
+                self._datastore.archive_data(data_dir=self._config.data_dir)
+        except Exception as ex:
+            _logger.error(f"Error archiving data from activte database: {ex}")
+            raise
+
 
     def upload_data(self):
         """
@@ -1663,9 +1681,17 @@ class DataMinderThread(DataThread):
                 )
 
     def sync_legacy_files(self, data_dir):
-        with self._csv_output_lock:
-            _logger.debug("Writing data to legacy file format")
-            self._datastore.sync_legacy_files(data_dir)
+        try:
+            with self._csv_output_lock:
+                _logger.debug("Writing data to legacy file format")
+                try:
+                    self._datastore.sync_legacy_files(data_dir)
+                except Exception as ex:
+                    _logger.error(f"Unable to sync legacy files because of error {ex}")
+        except Exception as ex:
+            _logger.error(f"Error syncing legacy csv files: {ex}")
+            raise
+
 
     @task_description("Sync csv files")
     def run_sync_csv_files(self, reschedule=True):
@@ -1696,6 +1722,10 @@ class DataMinderThread(DataThread):
 
     @task_description("Backup active database and sync csv files")
     def run_database_tasks(self, backup_time_of_day: datetime.time=None, reschedule=True):
+        if backup_time_of_day is None:
+            # default, one minute past midnight
+            backup_time_of_day = datetime.time(0,1)
+
         # there may be a long delay (e.g. network drives), so allow
         # this routine to hang without bringing down the entire program
         with self._heartbeat_time_lock:
