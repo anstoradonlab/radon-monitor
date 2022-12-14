@@ -65,6 +65,8 @@ sudo ./install.sh
 ```
 4. create a configuration file
 5. integrate with the system (cheat by using cron jobs)
+6. When new versions of `radon-monitor` get released, upgrade using this command:
+   `pip install --user --upgrade git+https://github.com/anstoradonlab/radon-monitor.git`
 
 
 ## Basic Troubleshooting ideas
@@ -124,8 +126,11 @@ datalogger_serial=-1
 
 
 [calbox]
-# there are different kinds of calibration units.  The "generic" kind is the 
-# most common one, designed to interface with a single radon detector.
+# there are different kinds of calibration units.  These are
+# - `generic`: single detector, built around a Labjack connected over USB
+# - `CapeGrim`: two detectors, built around a Labjack connected over USB
+# - `BurkertModel1`: one or two detectors, a new system available from Jan 2023.
+#                    This is interfaced over ethernet, with a Burkert ME43 gateway
 # There is also a kind called "mock" which can be used for testing the software
 # but which doesn't try to connect to hardware.
 kind=generic
@@ -135,10 +140,11 @@ radon_source_activity_bq=10e3
 
 # The labjack ID can be set in software.  A special value of -1 means
 # to use the first labjack found, which only makes sense if there is
-# only ever one labjack connected to the PC
+# only ever one labjack connected to the PC (only applies to Labjack-based devices)
 labjack_id=-1
 # Only use the labjack with the serial number specifed here.  A special
 # value of -1 means to ignore the serial number.
+# (only applies to Labjack-based devices)
 labjack_serial=-1
 # Flushing duration to use during calibrations (seconds)
 flush_duration_sec=3600
@@ -146,6 +152,11 @@ flush_duration_sec=3600
 inject_duration_sec=3600
 # Duration to switch to background mode for background charactisation (seconds)
 background_duration_sec=3600
+# ip address of the Burkert ME43 gateway (only applies when kind=BurkertModel1)
+me43_ip_address=192.168.0.100
+# flow rate setpoint on the calibration unit's mass flow controller (units of standard l/min)
+flush_flow_rate=0.5 (only applies when kind=BurkertModel1)
+
 
 
 #[ftp]
@@ -217,6 +228,13 @@ https://download.sqlitebrowser.org/DB.Browser.for.SQLite-3.12.2-win64.msi
 Notepad++:
 https://notepad-plus-plus.org/downloads/
 
+### Some kind of period backup solution (optional)
+
+WinSCP: https://winscp.net/ with a guide at https://winscp.net/eng/docs/guide_schedule
+
+On Linux, rsync might be suitable.
+
+For cloud storage, try rclone: https://rclone.org/
 
 ### Spreadsheet (optional)
 
