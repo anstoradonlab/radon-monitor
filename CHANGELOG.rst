@@ -63,5 +63,8 @@ Version 10.3
 
 Version 10.4
 ============
-not yet released
+14 December 2022
+
+ - Support for Burkert calibration unit
+ - Calculate radon concentration when reading Results table and report in an `ApproxRadon`` column
 
