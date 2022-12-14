@@ -15,7 +15,7 @@ import typing
 from collections import defaultdict
 from logging.handlers import RotatingFileHandler
 from sqlite3.dbapi2 import OperationalError
-from typing import Union
+from typing import Union, Dict, Any
 
 _logger = logging.getLogger(__name__)
 
@@ -42,6 +42,15 @@ def parse_date(tstr):
         tzinfo=datetime.timezone.utc
     )
 
+def enquote(itm):
+    """
+    Add double quotes to a string so that it can be used as an SQL table or column name
+
+    # TODO: decide how to handle SQL quoting/safety in general.  At present, all 
+    # dynamic names come from the datalogger or the database, so it should not be
+    # possible for them to be badly formed.
+    """
+    return '"' + itm + '"'
 
 # by default, a timezone-aware timestamp passed to the database will be written in
 # a format which can't easily be round-tripped
@@ -86,7 +95,7 @@ def iter_months(tmin, tmax):
 
 class LatestRowToken(object):
     # TODO: add type hint for Self (dunno how this should be expressed)
-    def __init__(self, t: Union[None, datetime.datetime], latest_rowid: int = 0):
+    def __init__(self, t: Union[None, datetime.datetime, 'LatestRowToken'], latest_rowid: int = 0):
         """
         Store a token which can be used to indicate the most recent data
         from a database.  It's better than just using a time because
@@ -98,8 +107,8 @@ class LatestRowToken(object):
                 not get displayed properly in guis
         """
         if type(t) == type(self):
-            self.t = t.t
-            self.latest_rowid = t.latest_rowid
+            self.t = t.t  # type: ignore
+            self.latest_rowid = t.latest_rowid  # type: ignore
         else:
             self.t = t
             self.latest_rowid = latest_rowid
@@ -438,7 +447,7 @@ class DataStore(object):
     _update_time_lock = threading.RLock()
     # this dictionary is keyd by a tuple of three strings
     #  (self.data_file, table_name, detector_name)
-    _table_update_time = {}
+    _table_update_time: Dict[str, Any] = {}
 
     def __init__(self, config, readonly=False):
         self.data_file = str(config.data_file)
@@ -462,7 +471,7 @@ class DataStore(object):
         # default timeout is 5 seconds - make this much longer
         # (in testing, no DB operations take more than about 4 seconds)
         timeout_seconds = 60 * 5
-        timeout_seconds = 1  # for testing (finds failure points)
+        #timeout_seconds = 1  # for testing (finds failure points)
         tid = threading.get_ident()
         if not tid in self._connection_per_thread:
             _logger.info(f"thread {tid} connecting to database {self.data_file}")
@@ -559,9 +568,7 @@ class DataStore(object):
         t = datetime.datetime.now(datetime.timezone.utc)
         # floor to nearest second
         t = datetime.datetime(*t.timetuple()[:6], tzinfo=t.tzinfo)
-        data = {"Datetime": t, "EventType": event_type, "EventData": event_text}
-        if detector_name is not None:
-            data["Detector"] = detector_name
+        data = {"Datetime": t, "EventType": event_type, "EventData": event_text, "Detector": detector_name}
         self.add_record(table_name, data)
 
     def get_state(self, key):
@@ -892,8 +899,12 @@ class DataStore(object):
                 )
                 raise ex
         except sqlite3.OperationalError as ex:
-            _logger.debug(f"SQL exception: {ex} while executing {sql}")
-            raise ex
+            if ex.args[0].startswith("no such table:"):
+                # table does not exist yet, return None instead
+                min_time = None
+            else:
+                _logger.debug(f"SQL exception: {ex} while executing {sql}")
+                raise ex
 
         _logger.debug(
             f"Executing SQL: {sql}, returned: {min_time}, took: {datetime.datetime.now(datetime.timezone.utc)-t0}"
@@ -1161,7 +1172,7 @@ class DataStore(object):
         """
         # write to a temp file first and then move as a final step
         fname_temp = fname_dest + ".tmp"
-
+        sql = ""
         try:
             t0 = time.time()
             # open a plain connection to the live database (no type conversions etc)
@@ -1188,15 +1199,14 @@ class DataStore(object):
                 db_column_names = [
                     itm[1] for itm in con.execute(f"PRAGMA table_info({table_name})")
                 ]
-                db_column_names_sql = ",".join(db_column_names)
+                db_column_names_sql = ",".join((enquote(itm) for itm in db_column_names))
                 with con:
                     cur = con.cursor()
                     with con_dest:
-                        rows = cur.execute(
-                            f"select {db_column_names_sql} from {table_name}"
-                        )
+                        sql = f"select {db_column_names_sql} from {enquote(table_name)}"
+                        rows = cur.execute(sql)
                         count = 0
-                        sql = f"insert into {table_name} values ({','.join('?'*len(db_column_names))})"
+                        sql = f"insert into {enquote(table_name)} values ({','.join('?'*len(db_column_names))})"
                         cur_dest = con_dest.cursor()
                         cur_dest.executemany(sql, (tuple(itm) for itm in rows))
                         nrows = cur_dest.rowcount
@@ -1210,6 +1220,8 @@ class DataStore(object):
             _logger.info(
                 f"Finished backing up file {fname_source} to {fname_dest} in {t - t0} seconds"
             )
+        except Exception as ex:
+            ex.args += (sql, )
         finally:
             if os.path.exists(fname_temp):
                 try:
@@ -1262,9 +1274,12 @@ class DataStore(object):
                         #  2. copy rows (takes about 4.4 seconds)
                         #  3. delete rows in activate database (takes about 1.1 seconds)
                         a = time.time()
-                        rows = cur.execute(
-                            f'select {db_column_names_sql} from {table_name} WHERE Datetime >= "{t0_query.strftime(DBTFMT)}" and Datetime < "{t1_query.strftime(DBTFMT)}"'
-                        )
+                        try:
+                            sql = f'select {db_column_names_sql} from {table_name} WHERE Datetime >= "{t0_query.strftime(DBTFMT)}" and Datetime < "{t1_query.strftime(DBTFMT)}"'
+                            rows = cur.execute(sql)
+                        except Exception as ex:
+                            _logger.error(f"Error executing sql: {sql}")
+                            raise
                         # print("TIMING1:", time.time() - a)
                         a = time.time()
                         count = 0
@@ -1365,6 +1380,11 @@ class DataStore(object):
         )
         # these are the maximum and minimum times in the database, converted into 
         # local time (defined as the timezone for the legacy csv output files)
+        tmin_utc = self.get_minimum_time(table_name)
+        # if this is None the table is empty and there's nothing more to do
+        if tmin_utc is None:
+            _logger.info(f"Not writing legacy files because database table {table_name} contains no data.")
+            return
         tmin_local = self.get_minimum_time(table_name) + tz_offset
         tmax_local = self.get_update_time(table_name, None) + tz_offset
 
@@ -1566,7 +1586,7 @@ if __name__ == "__main__":
             datefmt="%Y-%m-%d %H:%M:%S",
         )
 
-    setup_test_logging()
+    setup_test_logging(logging.DEBUG)
 
     class TestConfig:
         data_file = "test.sqlite"
@@ -1626,7 +1646,7 @@ if __name__ == "__main__":
     ds.archive_data(".\data-archive-test")
 
     #%%
-    ds.backup_activate_database(".\data-archive-test")
+    ds.backup_active_database(".\data-archive-test")
 
     #%%
     if False:

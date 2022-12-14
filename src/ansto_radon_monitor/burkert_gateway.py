@@ -1,8 +1,10 @@
 from pymodbus.client.sync import ModbusTcpClient
 from pymodbus.payload import BinaryPayloadDecoder, BinaryPayloadBuilder
+from pymodbus.constants import Endian
 from pymodbus.exceptions import ConnectionException
 import time
 import logging
+import traceback
 from typing import Dict, Any, List
 
 
@@ -25,13 +27,15 @@ class BurkertGateway(CalboxDevice):
         "SourceFlushExhaust",
         "Inject1",
         "Inject2",
-        "DisableStackBlower1",
-        "DisableStackBlower2",
+        "DisableInternalBlower1",
+        "DisableInternalBlower2",
         "ActivateCutoffValve1",
         "ActivateCutoffValve2",
     )
+    MFC_DEFAULT_FLOW = 0.5 # L/min
+    BYTEORDER = {"byteorder":Endian.Big, "wordorder":Endian.Big}
 
-    def __init__(self, ip_address: str):
+    def __init__(self, ip_address: str, flush_flow_rate: float):
         """
         Control a Burket calibration unit.
 
@@ -77,8 +81,12 @@ class BurkertGateway(CalboxDevice):
         2           2           Float          MFC flow rate set point (l/min at STP, aka Nl/min)
 
         """
+        _logger.info(f"Trying to connect to Burkert Calbox at IP address {ip_address}")
         self._ip_address = ip_address
-        self._mfc_setpoint = 1.0
+        if flush_flow_rate is not None:
+            self._mfc_setpoint = flush_flow_rate
+        else:
+            self._mfc_setpoint = self.MFC_DEFAULT_FLOW
         self.serial_number = None
         # this is able to connect even if ip_address is wrong
         # (but will fail later)
@@ -92,7 +100,10 @@ class BurkertGateway(CalboxDevice):
             # It's ok to read the serial number right away, though
             consts = self._read_constant_values()
             self.serial_number = consts["Serial Number"]
-            self._client.read_input_registers(0, count=2)
+            # read, but ignore, this
+            self._read_values()
+            # set the MFC and valves to idle state
+            self.reset_all()
             time.sleep(1.0)
         except ConnectionException as ex:
             _logger.error(f"Unable to connect to calibration box due to error: {ex}")
@@ -103,7 +114,7 @@ class BurkertGateway(CalboxDevice):
         """
         Turn on flow through the MFC by setting the target flow rate to the defined setpoint
         """
-        builder = BinaryPayloadBuilder()
+        builder = BinaryPayloadBuilder(**self.BYTEORDER)
         builder.add_32bit_float(setpoint_lpm)
         payload = builder.to_registers()
         self._client.write_registers(self.MFC_SETPOINT_ADDRESS, payload)
@@ -120,31 +131,31 @@ class BurkertGateway(CalboxDevice):
         read values from device
         """
         address_count_name = [
-            (0, 2, "source_pressure"),
-            (2, 2, "MFC flow rate"),
-            (4, 2, "MFC duty cycle"),
-            (6, 1, "MFC temperature"),
-            (7, 2, "MFC total volume"),
-            (9, 2, "MFC used set point value"),
+            (0, 2, "SourcePressure"),
+            (2, 2, "MfcFlowRate"),
+            (4, 2, "MfcDutyCycle"),
+            (6, 1, "MfcTemperature"),
+            (7, 2, "MfcTotalVolume"),
+            (9, 2, "MfcUsedSetPointValue"),
         ]
         data = {}
 
         for addr, count, name in address_count_name:
             result = self._client.read_input_registers(addr, count=count)
             if count == 2:
-                decoder = BinaryPayloadDecoder.fromRegisters(result.registers)
+                decoder = BinaryPayloadDecoder.fromRegisters(result.registers, **self.BYTEORDER)
                 decoded_val = decoder.decode_32bit_float()
             elif count == 1:
-                decoder = BinaryPayloadDecoder.fromRegisters(result.registers)
+                decoder = BinaryPayloadDecoder.fromRegisters(result.registers, **self.BYTEORDER)
                 decoded_val = decoder.decode_16bit_uint()
 
             data[name] = decoded_val
 
         # MFC set point is read/write and accessed with a different function
         result = self._client.read_holding_registers(2, 2)
-        decoder = BinaryPayloadDecoder.fromRegisters(result.registers)
+        decoder = BinaryPayloadDecoder.fromRegisters(result.registers, **self.BYTEORDER)
         decoded_val = decoder.decode_32bit_float()
-        data["MFC set point"] = decoded_val
+        data["MfcSetPoint"] = decoded_val
 
         return data
 
@@ -159,7 +170,7 @@ class BurkertGateway(CalboxDevice):
         data = {}
         for addr, count, name, decoderfunc in add_count_name_decoderfunc:
             result = self._client.read_holding_registers(addr, count=count)
-            decoder = BinaryPayloadDecoder.fromRegisters(result.registers)
+            decoder = BinaryPayloadDecoder.fromRegisters(result.registers, **self.BYTEORDER)
             decoded_val = decoderfunc(decoder)
             data[name] = decoded_val
         return data
@@ -193,7 +204,10 @@ class BurkertGateway(CalboxDevice):
         bg_idx = 4 + detector_idx
         flags = self._read_flags()
         flags[0] = True
-        flags[valve_idx] = True
+        flags[1] = False
+        flags[2] = False
+        flags[3] = False
+        flags[valve_idx] = True # this is valve 2 or valve 3
         # make sure this detector is switched out of background
         flags[bg_idx] = False
         self._set_flags(flags)
@@ -248,36 +262,47 @@ class BurkertGateway(CalboxDevice):
         self.reset_background(1)
 
     @property
-    def analogue_states(self) -> Dict[Any]:
+    def analogue_states(self) -> Dict[str, float]:
         data = self._read_values()
         return data
-
+    
     @property
-    def status(self) -> Dict[Any]:
-        """generate a human-readable status message based on DIO flags"""
+    def digital_output_state(self) -> Dict[str, bool]:
         flags = self._read_flags()
         # flags as a dict
         fd = {k: v for k, v in zip(self.FLAG_NAMES, flags)}
-        if not True in flags:
-            s = "Normal operations"
-        else:
-            s = []
-            if fd["Inject1"]:
-                s.append("Injecting from source into detector 1")
-            elif fd["Inject2"]:
-                s.append("Injecting from source into detector 2")
-            elif fd["SourceFlush"]:
-                s.append("Flushing source")
-            if fd["DisableInternalBlower1"]:
-                s.append("Performing background on detector 1")
-            if fd["DisableInternalBlower2"]:
-                s.append("Performing background on detector 2")
+        return fd
 
-            s = ", ".join(s)
 
-        status = {}
-        status["message"] = s
-        status["digital out"] = fd
-        status["analogue in"] = self.analogue_states
-        status["serial"] = self.serial_number
+    @property
+    def status(self) -> Dict[str, Any]:
+        """generate a human-readable status message based on DIO flags"""
+        try:
+            flags = self._read_flags()
+            fd = {k: v for k, v in zip(self.FLAG_NAMES, flags)}
+            if not True in flags:
+                s = "Normal operation"
+            else:
+                sl: List[str] = []
+                if fd["Inject1"]:
+                    sl.append("Injecting from source into detector 1")
+                elif fd["Inject2"]:
+                    sl.append("Injecting from source into detector 2")
+                elif fd["SourceFlush"]:
+                    sl.append("Flushing source")
+                if fd["DisableInternalBlower1"]:
+                    sl.append("Performing background on detector 1")
+                if fd["DisableInternalBlower2"]:
+                    sl.append("Performing background on detector 2")
+
+                s = ", ".join(sl)
+
+            status: Dict[str, Any] = {}
+            status["message"] = s
+            status["digital out"] = fd
+            status["analogue in"] = self.analogue_states
+            status["serial"] = self.serial_number
+        except Exception as ex:
+            _logger.error(f"Unable to read status from Burkert Gateway because of error {ex}.  {traceback.format_exc()}")
+            raise
         return status

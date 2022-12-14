@@ -1,4 +1,4 @@
-from abc import ABC, abstractmethod
+from abc import ABC, abstractmethod, abstractproperty
 from typing import Dict, Any
 
 
@@ -47,13 +47,17 @@ class CalboxDevice(ABC):
         """return to idle state"""
         pass
 
-    @abstractmethod
-    @property
-    def analogue_states(self) -> Dict[Any]:
-        channels_dict = {}
+    @abstractproperty
+    def analogue_states(self) -> Dict[str, float]:
+        channels_dict: Dict[str, float] = {}
         return channels_dict
+    
+# Commented out so that it can be implemented using a dict attribute
+#    @abstractproperty
+#    def digital_output_state(self) -> Dict[str, bool]:
+#        dio_dict: Dict[str, bool] = {}
+#        return dio_dict
 
-    @abstractmethod
-    @property
-    def status(self) -> Dict[Any]:
+    @abstractproperty
+    def status(self) -> Dict[str, Any]:
         """generate a human-readable status message based on DIO flags"""
