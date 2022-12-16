@@ -1452,17 +1452,16 @@ class DataStore(object):
                         output.append(str(itm))
                     else:
                         output.append("")
-                # if with_radon:
-                #     try:
-                #         cps = row['LLD_Tot'] / 30.0 / 60.0
-                #         ApproxRadon = (cps - bg_cps) / cal
-                #     except Exception as ex:
-                #         ApproxRadon = math.nan
-                #         if report_conversion_error:
-                #             _logger.error(f"Error calculating radon from at least one row: \"{ex}\" cal: {cal}, bg: {bg_cps}, row: {dict(row)}")
-                #             report_conversion_error = False
-
-                #     output.append(str(ApproxRadon))
+                if with_radon:
+                    try:
+                        cps = row['LLD_Tot'] / 30.0 / 60.0
+                        ApproxRadon = (cps - bg_cps) / cal
+                    except Exception as ex:
+                        ApproxRadon = math.nan
+                        if report_conversion_error:
+                            _logger.error(f"Error calculating radon from at least one row: \"{ex}\" cal: {cal}, bg: {bg_cps}, row: {dict(row)}")
+                            report_conversion_error = False
+                    output.append(str(ApproxRadon))
                 output_str = ", ".join(output)
                 # match the quirk of the comment column
                 output_str = output_str.replace(", ,", ",,")
