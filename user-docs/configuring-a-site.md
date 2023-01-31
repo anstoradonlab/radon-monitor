@@ -30,7 +30,7 @@ This is an outline of the steps required to set up `radon-monitor` on a new comp
 1. Stop the old Radon Monitor software and remove it from the list of startup programs
 2. Backup all data (the datalogger memory is going to be wiped in this procedure)
 3. Follow steps 1-5 for a new install.  If you want to keep producing CSV files in the same format as the old logging system, pay attention to the `csv_file_pattern` section of the configuration file. It might also be helpful to use the short code from the old logger as the detector name, e.g. short codes like "GP", "CG", in the past. 
-4. Using `Device Configuration Utility`, modify the datalogger code, as detailed below. This is optional, but will make the data more useful.
+4. Using `Device Configuration Utility`, modify the datalogger code, as detailed below (in Appendix 2). This is optional, but will make the data more useful.
 5. Also using `Device Configuration Utility`, set the datalogger clock to UTC.
 6. Run RDM, from the Windows start menu
     * Go to `File → Load Configuration` and choose `c:\data\rdm-config.ini`
