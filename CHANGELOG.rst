@@ -68,3 +68,8 @@ Version 10.4
  - Support for Burkert calibration unit
  - Calculate radon concentration when reading Results table and report in an `ApproxRadon`` column
 
+Version 10.5
+============
+13 February 2023
+
+ - Bugfix relese: keep running when csv sync fails (just log the error)
