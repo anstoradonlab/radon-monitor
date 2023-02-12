@@ -1690,7 +1690,6 @@ class DataMinderThread(DataThread):
                     _logger.error(f"Unable to sync legacy files because of error {ex}")
         except Exception as ex:
             _logger.error(f"Error syncing legacy csv files: {ex}")
-            raise
 
 
     @task_description("Sync csv files")
