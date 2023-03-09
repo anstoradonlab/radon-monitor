@@ -1386,7 +1386,11 @@ class DataLoggerThread(DataThread):
         ):
             # don't touch the clock - something is amiss
             _logger.error(
-                f"Datalogger and computer clocks are out of synchronisation by more than {maximum_time_difference_seconds} seconds, which is unexpected. Not adjusting time (Hint: do the adjustment manually)"
+                f"Datalogger and computer clocks are out of synchronisation by more "
+                f"than {maximum_time_difference_seconds} seconds, which is "
+                f"unexpected. Time difference (datalogger minus computer) is"
+                f": {clock_offset}, detector: {self.detectorName}. Not adjusting "
+                f"time (Hint: do the adjustment manually)"
             )
         elif (
             maximum_time_difference_seconds is not None
