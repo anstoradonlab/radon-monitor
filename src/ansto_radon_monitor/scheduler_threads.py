@@ -478,6 +478,16 @@ class CalibrationUnitThread(DataThread):
             # update the status cache
             _ = self.status
 
+    def shutdown_func(self):
+        # this should have no effect.  It's here in case of logic errors in shutdown
+        # - a non-logging command to reset the device to its default state.
+        if self._device is None:
+            return
+        try:
+            self._device.reset_all()
+        except Exception as ex:
+            _logger.error(f"Error reseting Calbox Device: {ex}, {traceback.format_exc()}")
+
     # don't include this function in the list of tasks
     # @task_description("Calibration unit: measure state")
     def run_measurement(self):
