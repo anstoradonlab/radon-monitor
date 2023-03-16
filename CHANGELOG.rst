@@ -7,7 +7,31 @@ Version 10.6
 ============
 not yet released
 
-  - 
+  - Potential fix for issue #4 (calbox once failed to reset, and kept injecting)
+  - Add the option to run without a calibration unit
+      This adds a configuration option and handles
+      the absence of a calibration unit::
+      
+      [calbox]
+      kind=none
+      
+  - Added calibrated flow to CalibrationUnit table
+
+    The CalibrationUnit table now includes the calibrated flow rate
+    in a field called `Flow_lpm` in addition to the existing `Flow`
+    column which records the voltage of the flow rate transmiter, a
+    Honeywell AWM3100.
+
+    There is a new configuration option to control the conversion
+    from voltage to flow rate. It can be left unset, as it has a reasonable
+    default value as follows::
+    
+    [calbox]
+    flow_sensor_polynomial=0.1025, -0.17965, 0.0669979
+
+  - log the clock offset, even when it badly out of sync (more than 1 minute)
+  - Add countdown dialog to GUI during startup
+    
 
 Version 10.5
 ============
@@ -46,7 +70,7 @@ Version 10.2
 - Fix external flow rate display (now showing mean flow rate over the last 30 minutes)
 - Users can trigger a backup/csv sync from the File menu
 - A banner display is shown at the top of the app during calibration or background
-- Write a summary message to LogMessages at the end of a complete calibration or background, e.g.
+- Write a summary message to LogMessages at the end of a complete calibration or background, e.g.::
 
   {"EventType": "Calibration", 
   "FlushStart": "2022-10-20 22:46:15+00:00", 
@@ -68,7 +92,7 @@ Version 10.1
 - Switch to using forked cr1000 communication library
 - Handle multi-head detector and test at Cape Grim
 - No longer create Views in database
-- Add configuration option for backup time of day
+- Add configuration option for backup time of day::
 
     [data]
     backup_time_of_day=10:15
