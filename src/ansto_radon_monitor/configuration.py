@@ -89,6 +89,7 @@ class CalUnitConfig:
     inject_duration_sec: int = 3600 * 6
     background_duration_sec: int = 3600 * 24
     radon_source_activity_bq: typing.Optional[float] = None
+    flow_sensor_polynomial: typing.List[float] = field(default_factory=lambda: [0.1025, -0.17965, 0.0669979])
 
 
 @dataclass
@@ -135,7 +136,8 @@ def parse_config(raw_cfg) -> Configuration:
         #        DetectorKind: parse_detector_kind,
         bool: str2bool,
         float: float,
-        datetime.time: lambda x: datetime.datetime.strptime(x, '%H:%M').time()
+        datetime.time: lambda x: datetime.datetime.strptime(x, '%H:%M').time(),
+        typing.List[float]: lambda x: [float(itm) for itm in x.strip('[]').split(',')],
     }
 
     # create and validate the Configuration object

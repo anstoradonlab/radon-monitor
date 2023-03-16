@@ -312,6 +312,7 @@ class CalibrationUnitThread(DataThread):
         self._radon_source_activity_bq = config.calbox.radon_source_activity_bq
         self._ip_address = config.calbox.me43_ip_address
         self._flush_flow_rate = config.calbox.flush_flow_rate
+        self._flow_sensor_polynomial = config.calbox.flow_sensor_polynomial
 
         # lower numbers are higher priority
         # task priority is *also* used to identify tasks later, so that
@@ -361,10 +362,10 @@ class CalibrationUnitThread(DataThread):
                         labjack_id=None, serialNumber=serialNumber
                     )
                 elif self._kind == "generic":
-                    self._device = CalBoxLabjack(labjack_id, serialNumber=serialNumber)
+                    self._device = CalBoxLabjack(labjack_id, serialNumber=serialNumber, flow_sensor_polynomial=self._flow_sensor_polynomial)
                 elif self._kind == "CapeGrim":
                     self._device = CapeGrimLabjack(
-                        labjack_id, serialNumber=serialNumber
+                        labjack_id, serialNumber=serialNumber, flow_sensor_polynomial=self._flow_sensor_polynomial
                     )
                 elif self._kind == "burkertModel1":
                     self._device = BurkertGateway(ip_address=ip_address, flush_flow_rate=flush_flow_rate)

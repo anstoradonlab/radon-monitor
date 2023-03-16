@@ -41,6 +41,21 @@ def int_to_bool_list(bitfield, numbits, dtype=bool):
         a[ii] = dtype(bitfield >> ii & 1)
     return a
 
+def flow_sensor_v_to_lpm(V: float, coeffs: List[float]) -> float:
+    """Convert from voltage (V) into flow rate (lpm) for the flow sensor in the Labjack-based calibration units
+
+    Args:
+        V (float): Voltage measured on sensor
+        coeffs (List[float]): three polynomial coefficients to do the conversion, 
+                    [V*2 coefficient, V coefficient, constant]
+
+    Returns:
+        float: flow rate in lpm
+    """    
+    if V is None:
+        return None
+    flow_lpm = (coeffs[0]*V**2 + coeffs[1]*V + coeffs[2]) / 100.0
+    return flow_lpm
 
 class LabjackWrapper:
     """Wrapper for the labjack interface.
@@ -256,7 +271,7 @@ class CalBoxLabjack(CalboxDevice):
     TODO: maybe lock more, perhaps even the whole thing
     """
 
-    def __init__(self, labjack_id=-1, serialNumber=None):
+    def __init__(self, labjack_id=-1, serialNumber=None, flow_sensor_polynomial=[0.1025, -0.17965, 0.0669979]):
         """Interface for the labjack, as it is installed in our pumped Cal Box
 
         Parameters
@@ -268,9 +283,14 @@ class CalBoxLabjack(CalboxDevice):
                 * `None`: don't connect to a labjack, but run anyway (this is
                   for testing without access to a labjack)
 
+        flow_sensor_polynomial (List[float]): 
+            three polynomial coefficients to do the conversion from V to lpm, 
+                [V*2 coefficient, V coefficient, constant]
+
         serialNumber : int, optional
             If provided, this is the serial number of the labjack to connect to
         """
+        self._flow_sensor_polynomial = flow_sensor_polynomial
         self._init_serial_number = serialNumber
         self._init_labjack_id = labjack_id
         self.no_hardware_mode = labjack_id is None
@@ -400,6 +420,10 @@ class CalBoxLabjack(CalboxDevice):
                 voltages = self.lj.analogue_states
             for k in self.analogue_input_channel:
                 channels_dict[k] = voltages[self.analogue_input_channel[k]]
+        if "Flow" in channels_dict:
+            # calibrated flow rate, "Flow" is measured in V
+            V = channels_dict["Flow"]
+            channels_dict["Flow_lpm"] = flow_sensor_v_to_lpm(V, self._flow_sensor_polynomial)
         return channels_dict
 
     def _send_state_to_device(self):
