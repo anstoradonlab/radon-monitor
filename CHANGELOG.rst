@@ -2,29 +2,36 @@
 Changelog
 =========
 
-Version 10.0
+
+Version 10.6
 ============
-18 August 2022
+not yet released
 
-- First release, alpha quality
+  - 
 
-
-Version 10.1
+Version 10.5
 ============
-10 October 2022
+13 February 2023
 
-- Allow Campbell loggers to be set to non-UTC
-- Store some persistent state to database
-- Only communicate through a single thread with LabJack (that is, stop assuming
-  that there's no thread-local state in the labjack driver)
-- Switch to using forked cr1000 communication library
-- Handle multi-head detector and test at Cape Grim
-- No longer create Views in database
-- Add configuration option for backup time of day
+ - Bugfix relese: keep running when csv sync fails (just log the error)
 
-    [data]
-    backup_time_of_day=10:15
+Version 10.4
+============
+14 December 2022
 
+ - Support for Burkert calibration unit
+ - Calculate radon concentration when reading Results table and report in an `ApproxRadon`` column
+
+Version 10.3
+============
+1 December 2022
+
+- Add source activity to calibration metadata
+- Add ApproxRadon column to csv output (no GUI yet - relies on manually setting cal/bg in 'persistent_state' table in database)
+- Improve behaviour during shutdown, avoiding a hang
+- Sync csv output every 30 minutes
+- Fix issue where CSV files stopped updating at end of month
+- Improve plotting and slightly adjust labels to fit better on small screens
 
 Version 10.2
 ============
@@ -50,30 +57,24 @@ Version 10.2
 - Display 24h of data in the RTV (10-sec) display
 - Keep tables scrolled to the bottom in GUI, unless the user scrolls up
 
-Version 10.3
+Version 10.1
 ============
-1 December 2022
+10 October 2022
 
-- Add source activity to calibration metadata
-- Add ApproxRadon column to csv output (no GUI yet - relies on manually setting cal/bg in 'persistent_state' table in database)
-- Improve behaviour during shutdown, avoiding a hang
-- Sync csv output every 30 minutes
-- Fix issue where CSV files stopped updating at end of month
-- Improve plotting and slightly adjust labels to fit better on small screens
+- Allow Campbell loggers to be set to non-UTC
+- Store some persistent state to database
+- Only communicate through a single thread with LabJack (that is, stop assuming
+  that there's no thread-local state in the labjack driver)
+- Switch to using forked cr1000 communication library
+- Handle multi-head detector and test at Cape Grim
+- No longer create Views in database
+- Add configuration option for backup time of day
 
-Version 10.4
+    [data]
+    backup_time_of_day=10:15
+
+Version 10.0
 ============
-14 December 2022
+18 August 2022
 
- - Support for Burkert calibration unit
- - Calculate radon concentration when reading Results table and report in an `ApproxRadon`` column
-
-Version 10.5
-============
-13 February 2023
-
- - Bugfix relese: keep running when csv sync fails (just log the error)
-
- Version 10.6
- ============
- not yet released
+- First release, alpha quality
