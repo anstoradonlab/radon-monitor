@@ -238,6 +238,9 @@ class MainController(object):
         self._shutting_down = False
         self._configuration = configuration
         logging.info(f"RDM version {ansto_radon_monitor.__version__}")
+        # a publically accessiable flag to indicate weather or not there is a calibration
+        # unit present
+        self.has_calibration_unit = False
         try:
             self._start_threads()
             self.datastore.add_log_message("SystemEvent", "Startup")
@@ -253,11 +256,17 @@ class MainController(object):
             self._threads = []
 
         # calibration unit
-        self._cal_system_task = CalibrationUnitThread(
-            self._configuration, datastore=self.datastore
-        )
-        with self._thread_list_lock:
-            self._threads.append(self._cal_system_task)
+        if not self._configuration.calbox.kind.lower() == 'none':
+            self._cal_system_task = CalibrationUnitThread(
+                self._configuration, datastore=self.datastore
+            )
+            with self._thread_list_lock:
+                self._threads.append(self._cal_system_task)
+            self.has_calibration_unit = True
+        else:
+            self._cal_system_task = None
+            self.has_calibration_unit = False
+            
 
         # radon detector(s)
         for ii, detector_config in enumerate(self._configuration.detectors):
@@ -428,8 +437,9 @@ class MainController(object):
             )
             summary_list.append(f"{k}   {itm_summary}")
 
-        summary_cal = f"Calibration Unit    {status['CalibrationUnitThread']['status']['message']}"
-        summary_list.append(summary_cal)
+        if self.has_calibration_unit:
+            summary_cal = f"Calibration Unit    {status['CalibrationUnitThread']['status']['message']}"
+            summary_list.append(summary_cal)
 
         status["summary"] = " | ".join(summary_list)
         return status
@@ -467,6 +477,11 @@ class MainController(object):
         start_time=None,
         detector_idx=0,
     ):
+        if self._cal_system_task is None:
+            _logger.error(
+                            f"Attempted perform calibration function but a calibration unit is not configured.  {traceback.format_exc()}"
+                        )
+            return
         self._cal_system_task.run_calibration(
             flush_duration,
             inject_duration,
@@ -475,14 +490,29 @@ class MainController(object):
         )
 
     def run_background(self, duration=12 * 3600, start_time=None, detector_idx=0):
+        if self._cal_system_task is None:
+            _logger.error(
+                            f"Attempted perform calibration function but a calibration unit is not configured.  {traceback.format_exc()}"
+                        )
+            return
         self._cal_system_task.run_background(
             duration, start_time=start_time, detector_idx=detector_idx
         )
 
     def stop_calibration(self):
+        if self._cal_system_task is None:
+            _logger.error(
+                            f"Attempted perform calibration function but a calibration unit is not configured.  {traceback.format_exc()}"
+                        )
+            return
         self._cal_system_task.cancel_calibration()
 
     def stop_background(self):
+        if self._cal_system_task is None:
+            _logger.error(
+                            f"Attempted perform calibration function but a calibration unit is not configured.  {traceback.format_exc()}"
+                        )
+            return
         self._cal_system_task.cancel_background()
 
     def schedule_recurring_calibration(
@@ -493,6 +523,11 @@ class MainController(object):
         cal_interval,
         detector_idx=0,
     ):
+        if self._cal_system_task is None:
+            _logger.error(
+                            f"Attempted perform calibration function but a calibration unit is not configured.  {traceback.format_exc()}"
+                        )
+            return
         self._cal_system_task.schedule_recurring_calibration(
             flush_duration,
             inject_duration,
@@ -508,6 +543,11 @@ class MainController(object):
         background_interval,
         detector_idx=0,
     ):
+        if self._cal_system_task is None:
+            _logger.error(
+                            f"Attempted perform calibration function but a calibration unit is not configured.  {traceback.format_exc()}"
+                        )
+            return
         self._cal_system_task.schedule_recurring_background(
             duration,
             t0_background,
@@ -517,15 +557,15 @@ class MainController(object):
 
     def cal_and_bg_is_scheduled(self):
         """return true if it looks like a bg and cal are scheduled"""
-        return self._cal_system_task.cal_and_bg_is_scheduled()
+        return self._cal_system_task is None or self._cal_system_task.cal_and_bg_is_scheduled()
 
     @property
     def cal_running(self):
-        return self._cal_system_task.cal_running
+        return self._cal_system_task is None or self._cal_system_task.cal_running
 
     @property
     def bg_running(self):
-        return self._cal_system_task.bg_running
+        return self._cal_system_task is None or self._cal_system_task.bg_running
 
     @property
     def maintenance_mode(self):

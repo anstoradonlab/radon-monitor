@@ -371,7 +371,6 @@ class CalibrationUnitThread(DataThread):
                     self._device = BurkertGateway(ip_address=ip_address, flush_flow_rate=flush_flow_rate)
                 elif self._kind == "none":
                     self._device = None
-                    raise NotImplementedError("Still need to write support for no calibration unit")
                 elif self._kind == "mockCapeGrim":
                     self._device = CapeGrimLabjack(
                         labjack_id=None, serialNumber=serialNumber
