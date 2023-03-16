@@ -73,3 +73,7 @@ Version 10.5
 13 February 2023
 
  - Bugfix relese: keep running when csv sync fails (just log the error)
+
+ Version 10.6
+ ============
+ not yet released
