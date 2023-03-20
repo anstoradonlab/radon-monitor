@@ -1103,6 +1103,12 @@ class DataStore(object):
         filename_counter = 0
         existing_structure = self.get_structure_sql(con)
 
+        # This should never happen, but has been added because an old version of RDM was creating
+        # empty .db files through to 2046.  If the bug resurfaces, this check might help us to
+        # find it
+        if y > datetime.datetime.now().year + 9:
+            raise RuntimeError(f"Attempted to create archive file for a time in the distant future ({fname_archive})")
+
         while True:
             if not os.path.exists(fname_archive):
                 archive_exists = False
