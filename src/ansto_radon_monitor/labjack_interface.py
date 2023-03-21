@@ -73,6 +73,9 @@ class LabjackWrapper:
     """
 
     def __init__(self, labjack_id=-1, serialNumber=None):
+        self._thread_id = threading.get_ident()
+        # this is what we expect the output state to be in
+        self._current_state = [None] * 16
         try:
             if serialNumber is not None:
                 self.device = u12.U12(debug=False, serialNumber=serialNumber)
@@ -101,6 +104,8 @@ class LabjackWrapper:
         _logger.debug(f"Setting digital outputs to: {state}")
         d = self.device
         assert len(state) == 16
+        assert (self._thread_id == threading.get_ident())
+        self._current_state = list(state)
         if os.name == "nt":
             # the IO lines are unused - but we need to set something
             trisIO = 0
@@ -131,6 +136,8 @@ class LabjackWrapper:
     def reset_dio(self):
         """Sets output to zero on all channels while also configuring all DIO channels as output"""
         _logger.debug(f"Setting all digital outputs to zero")
+        assert (self._thread_id == threading.get_ident())
+        self._current_state = [0 for ii in range(16)]
         d = self.device
         # eDigitalOut doesn't work on Windows, so use the low-level commands
         if os.name == "nt":
@@ -158,17 +165,21 @@ class LabjackWrapper:
 
     def set_dio(self, channel, state):
         """Set one DIO channel to 1 or 0"""
+        assert state == 0 or state == 1
+        assert (self._thread_id == threading.get_ident())
         _logger.debug(f"Setting one digital output, channel: {channel}, state: {state}")
         d = self.device
         ret = d.eDigitalOut(channel, state)
         # TODO: raise an exception instead (may have lost connection to labjack)
         assert ret["idnum"] == d.id
+        self._current_state[channel] = state
 
     @property
     def dio_states(self):
         """
         Read the DIO states
         """
+        assert (self._thread_id == threading.get_ident())
         _logger.debug(f"Reading DIO states")
         d = self.device
         if os.name == "nt":
@@ -185,6 +196,10 @@ class LabjackWrapper:
             level = int_to_bool_list(status["D7toD0States"], 8) + int_to_bool_list(
                 status["D15toD8States"], 8
             )
+
+        for expected, actual in zip(self._current_state, level):
+            if not bool(expected) == bool(actual):
+                _logger.error(f"Expected DIO state did not match the value read from Labjack.  Expected: {self._current_state}, Actual: {level}")
 
         return level, direction
 
@@ -216,6 +231,7 @@ class LabjackWrapper:
     @property
     def analogue_states(self, retries=3):
         """Read analog channels 0 and 1"""
+        assert (self._thread_id == threading.get_ident())
         _logger.debug(f"Reading analog channels")
         d = self.device
         try:
@@ -244,6 +260,7 @@ class LabjackWrapper:
 
     @property
     def serial_number(self):
+        assert (self._thread_id == threading.get_ident())
         _logger.debug(f"Reading labjack serial number")
         d = self.device
         # serial no is four bytes at address 0
@@ -296,6 +313,7 @@ class CalBoxLabjack(CalboxDevice):
         self.no_hardware_mode = labjack_id is None
         self.serial_number = None
 
+        self._thread_id = threading.get_ident()
         # initialise some flags on the computer-side (no comms)
         self._init_flags()
 
@@ -443,6 +461,8 @@ class CalBoxLabjack(CalboxDevice):
     @property
     def status(self):
         """generate a human-readable status message based on DIO flags"""
+        # force a read from the device
+        _device_states = self.lj.dio_states
         flags = [
             self.digital_output_state["ActivatePump"],
             self.digital_output_state["ActivateInject"],
@@ -660,6 +680,14 @@ class CapeGrimLabjack(CalBoxLabjack):
 # .... utility functions
 #
 
+def get_labjack_error_string(errorcode: int) -> str:
+    errorString = ctypes.c_char_p(b" "*50)
+    errno = u12.staticLib.GetErrorString(errorcode, errorString)
+    if errno == 0:
+        ret = str(errorString.value, encoding='utf-8')
+    else:
+        ret = f"Error {errorcode}"
+    return errorString.value
 
 def list_all_u12():
     """
