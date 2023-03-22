@@ -200,6 +200,7 @@ class LabjackWrapper:
         for expected, actual in zip(self._current_state, level):
             if not bool(expected) == bool(actual):
                 _logger.error(f"Expected DIO state did not match the value read from Labjack.  Expected: {self._current_state}, Actual: {level}")
+                # TODO: Raise error???
 
         return level, direction
 
@@ -244,7 +245,7 @@ class LabjackWrapper:
             _logger.error(f"Error reading from labjack analogue channels: {ex}")
             if retries > 0:
                 time.sleep(0.1)
-                self.analogue_states(self, retries=retries - 1)
+                return self.analogue_states(self, retries=retries - 1)
             else:
                 return [None, None]
 

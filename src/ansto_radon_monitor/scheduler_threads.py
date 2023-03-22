@@ -411,6 +411,7 @@ class CalibrationUnitThread(DataThread):
             _logger.error(
                 f"Unable to {description} "
                 f" because of error: {ex}.  Attempting to reconnect and reset."
+                f"{traceback.format_exc(ex)}"
             )
             self._device = None
             self._schedule_connection(self._init_labjack_id, self._init_serialNumber, self._ip_address, self._flush_flow_rate)
