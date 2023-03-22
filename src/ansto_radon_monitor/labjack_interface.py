@@ -230,34 +230,39 @@ class LabjackWrapper:
         # d.rawDIO(**state, UpdateDigital=True)
 
     @property
-    def analogue_states(self, retries=3):
+    def analogue_states(self):
+        return self._analogue_states_func()
+    
+    def _analogue_states_func(self, retries=3):
         """Read analog channels 0 and 1"""
         assert (self._thread_id == threading.get_ident())
         _logger.debug(f"Reading analog channels")
         d = self.device
+        success = True
         try:
             a_in = d.aiSample(channels=[0, 1], numChannels=2)
             # a_in is now something like: {'idnum': -1,
             #    'stateIO': 0,
             #    'overVoltage': 999,  # 0 - not over voltage, >0 - over voltage
             #    'voltages': [2.5, 1.9677734375]}
+            if a_in["overVoltage"] > 0:
+                _logger.error(f"One of the Labjack analog channels is over voltage")
+            # remember - special value of -1 means 'talk to any labjack'
+            if d.id != -1 and a_in["idnum"] != d.id:
+                _logger.error(
+                    f"Labjack reports IDNUM={a_in['idnum']} but we expected {d.id}"
+                )
+            voltages = a_in["voltages"]
         except Exception as ex:
             _logger.error(f"Error reading from labjack analogue channels: {ex}")
-            if retries > 0:
-                time.sleep(0.1)
-                return self.analogue_states(self, retries=retries - 1)
-            else:
-                return [None, None]
-
-        if a_in["overVoltage"] > 0:
-            _logger.error(f"One of the Labjack analog channels is over voltage")
-        # remember - special value of -1 means 'talk to any labjack'
-        if d.id != -1 and a_in["idnum"] != d.id:
-            _logger.error(
-                f"Labjack reports IDNUM={a_in['idnum']} but we expected {d.id}"
-            )
-
-        return a_in["voltages"]
+            voltages = [None, None]
+            success = False
+        
+        if not success and retries > 0:
+            time.sleep(0.5)
+            voltages = self._analogue_states_func(self, retries=retries - 1)
+        
+        return voltages
 
     @property
     def serial_number(self):
