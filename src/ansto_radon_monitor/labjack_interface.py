@@ -294,7 +294,7 @@ class CalBoxLabjack(CalboxDevice):
     TODO: maybe lock more, perhaps even the whole thing
     """
 
-    def __init__(self, labjack_id=-1, serialNumber=None, flow_sensor_polynomial=[0.1025, -0.17965, 0.0669979]):
+    def __init__(self, labjack_id=-1, serialNumber=None, flow_sensor_polynomial=None):
         """Interface for the labjack, as it is installed in our pumped Cal Box
 
         Parameters
@@ -313,6 +313,8 @@ class CalBoxLabjack(CalboxDevice):
         serialNumber : int, optional
             If provided, this is the serial number of the labjack to connect to
         """
+        if flow_sensor_polynomial is None:
+            flow_sensor_polynomial = [0.1025, -0.17965, 0.0669979]
         self._flow_sensor_polynomial = flow_sensor_polynomial
         self._init_serial_number = serialNumber
         self._init_labjack_id = labjack_id
@@ -500,7 +502,7 @@ class CalBoxLabjack(CalboxDevice):
 
 
 class CapeGrimLabjack(CalBoxLabjack):
-    def __init__(self, labjack_id=-1, serialNumber=None):
+    def __init__(self, labjack_id=-1, serialNumber=None, flow_sensor_polynomial=None):
         """Interface for the labjack, as it is installed at Cape Grim
 
         Parameters
@@ -515,7 +517,7 @@ class CapeGrimLabjack(CalBoxLabjack):
         serialNumber : int, optional
             If provided, this is the serial number of the labjack to connect to
         """
-        super().__init__(labjack_id, serialNumber)
+        super().__init__(labjack_id, serialNumber, flow_sensor_polynomial)
 
     def _init_flags(self):
 
