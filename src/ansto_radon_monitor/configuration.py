@@ -64,7 +64,7 @@ class DetectorConfig:
 
     name: str = ""
     serial_port: str = ""
-    baudrate: int = 115200
+    baudrate: int = 9600
     kind: str = ""
     volume_m3: typing.Optional[float] = None
     thoron_delay_volume_m3: typing.Optional[float] = None

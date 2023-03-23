@@ -31,7 +31,8 @@ not yet released
 
   - log the clock offset, even when it badly out of sync (more than 1 minute)
   - Add countdown dialog to GUI during startup
-    
+  - set default baud rate to 9600 to make communications as robust as possible.
+    Users can still change the baudrate if their setup supports higher baudrates.
 
 Version 10.5
 ============
