@@ -260,7 +260,7 @@ class LabjackWrapper:
         
         if not success and retries > 0:
             time.sleep(0.5)
-            voltages = self._analogue_states_func(self, retries=retries - 1)
+            voltages = self._analogue_states_func(retries=retries - 1)
         
         return voltages
 
