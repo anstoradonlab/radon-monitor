@@ -1116,10 +1116,10 @@ class DataLoggerThread(DataThread):
                 if not detector_config.datalogger_serial == -1:
                     if not self.status["serial"] == detector_config.datalogger_serial:
                         _logger.error(
-                            "Datalogger found, but serial number does not match configuration (required serial: {datalogger_config.serial}, discovered serial: {self.status['serial'] }"
+                            f"Datalogger found, but serial number does not match configuration (required serial: {detector_config.serial}, discovered serial: {self.status['serial'] }"
                         )
                         self._datalogger.close()
-                        self.status["link"] = "disconnected"
+                        self.status["link"] = "disconnected: datalogger has the wrong serial"
                         # TODO: the user needs to be informed of this more clearly
 
                 if hasattr(self._datalogger.pakbus.link, "baudrate"):
