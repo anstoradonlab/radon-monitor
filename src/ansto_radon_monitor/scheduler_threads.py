@@ -998,7 +998,7 @@ class DataLoggerThread(DataThread):
         ser = serial.Serial(
             port=None,
             baudrate=detector_config.baudrate,
-            timeout=10,
+            timeout=2,
             bytesize=serial.EIGHTBITS,
             parity=serial.PARITY_NONE,
             stopbits=1,
@@ -1008,7 +1008,7 @@ class DataLoggerThread(DataThread):
         # use a fairly short timeout during the connection process (because one of the steps involves
         # reading from the port until timeout to clear the buffers) but then change the timeout
         # to a larger value once connected
-        ser.timeout = 60
+        ser.timeout = 30
         # on one of the serial-to-usb drivers that I've used, it seems to be a bad idea to read from
         # the port right after changing the timeout - add a delay here to (hopefully) avoid this 
         # issue
