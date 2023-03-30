@@ -72,6 +72,7 @@ class DetectorConfig:
     datalogger_serial: int = -1
     csv_file_pattern: typing.Optional[str] = None
     datalogger_time_offset: float = 0.0
+    report_pakbus_statistics: bool = False
 
 
 @dataclass

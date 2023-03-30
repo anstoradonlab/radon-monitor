@@ -957,6 +957,7 @@ class DataLoggerThread(DataThread):
         self._rename_table = {"HURD2OUT": "Results"}
         self._config = detector_config
         self._datalogger: typing.Optional[CR1000] = None
+        self._last_stats_report_hour = None
         self.status = {"link": "connecting", "serial": None}
         self.name = f"DataLoggerThread({detector_config.name})"
         self.detectorName = detector_config.name
@@ -1037,17 +1038,46 @@ class DataLoggerThread(DataThread):
             s = f"Error loading RTV from database (data display may show invalid data for the next 30 minutes): {ex} "
             s += traceback.format_exc()
             _logger.error(s)
+    
+    def _report_pakbus_stats(self, force=False):
+        """report pakbus packet statistics to logger.info hourly
+
+        Args:
+            force (bool, optional): 
+            Force output of statistics, even if the hour isn't up. Defaults to False.
+        """
+        # datalogger not connected
+        if self._datalogger is None:
+            return
+        # datalogger doesn't support stats
+        if not hasattr(self._datalogger.pakbus, "stats"):
+            return
+        # configuration file says not to report statistics
+        if not self._config.report_pakbus_statistics:
+            return
+        # check that an hour has rolled over
+        if not force:
+            current_hour = datetime.datetime.utcnow().hour
+            if self._last_stats_report_hour == current_hour:
+                return
+            self._last_stats_report_hour = current_hour
+        # do it
+        report_txt = self._datalogger.pakbus.stats.summary()
+        self._datalogger.pakbus.stats.reset()
+        _logger.info(report_txt)   
 
     def shutdown_func(self):
         # the CR1000 finalizer (__del__) closes the port and
         # sends a goodbye message to the datalogger.  It is
         # an 'implementation detail' of Cython that this will
         # happen right away
+        self._report_pakbus_stats(force=True)
         self._datalogger = None
 
     def reconnect_func(self):
         """This gets called if 'measurement_func' fails"""
         if self._datalogger is not None:
+            self._report_pakbus_stats(force=True)
             device = self._datalogger
             self._datalogger = None
             try:
@@ -1210,6 +1240,9 @@ class DataLoggerThread(DataThread):
             finally:
                 self.update_heartbeat_time()
                 self.max_heartbeat_age_seconds = saved_max_hb_age
+        
+        # This function will only do something when the hour rolls over
+        self._report_pakbus_stats()
 
     def html_current_status(self):
         """Return the current measurement status as html"""

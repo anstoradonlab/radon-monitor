@@ -33,6 +33,13 @@ not yet released
   - Add countdown dialog to GUI during startup
   - set default baud rate to 9600 to make communications as robust as possible.
     Users can still change the baudrate if their setup supports higher baudrates.
+  
+  - add option to report PakBus statistics (currently on disconnect and hourly, 
+    default is False)::
+
+    [detector1]
+    report_pakbus_statistics=True
+
 
 Version 10.5
 ============
