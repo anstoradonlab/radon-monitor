@@ -880,15 +880,22 @@ class DataStore(object):
             min_times = []
             for table_name in self.tables:
                 if "Datetime" in self.get_column_names(table_name):
-                    min_times.append(self.get_minimum_time(table_name))
-            # TODO:decide what to do if there are no Datetime columns, depending on how this function is used
-            # currently min([]) --> raises ValueError
-            return min(min_times)
+                    min_time = self.get_minimum_time(table_name)
+                    if min_time is not None:
+                        min_times.append(min_time)
+
+            if len(min_times) == 0:
+                return None
+            else:
+                return min(min_times)
 
         t0 = datetime.datetime.now(datetime.timezone.utc)
         sql = f"select min(Datetime) from {table_name}"
         try:
             tstr = tuple(self.con.execute(sql).fetchall()[0])[0]
+            if tstr is None:
+                # empty table
+                return None
             try:
                 min_time = datetime.datetime.strptime(
                     tstr, "%Y-%m-%d %H:%M:%S"
@@ -1471,6 +1478,9 @@ class DataStore(object):
                     try:
                         cps = row['LLD_Tot'] / 30.0 / 60.0
                         ApproxRadon = (cps - bg_cps) / cal
+                    except TypeError:
+                        # this happens if one of the input parameters is None
+                        ApproxRadon = math.nan
                     except Exception as ex:
                         ApproxRadon = math.nan
                         if report_conversion_error:
