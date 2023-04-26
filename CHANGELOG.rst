@@ -5,12 +5,15 @@ Changelog
 
 Version 10.6
 ============
-not yet released
+27 April 2023
 
+  - Fix an issue where a disconnected calibration unit will eventually crash the
+    logging software 
   - Add an option to set the injection flow rate on a Burkert calibration box::
 
       [calbox]
       inject_flow_rate=0.5
+      flush_flow_rate=0.5
 
   - Potential fix for issue #4 (calbox once failed to reset, and kept injecting)
   - Add the option to run without a calibration unit
@@ -28,7 +31,8 @@ not yet released
     Honeywell AWM3100.
 
     There is a new configuration option to control the conversion
-    from voltage to flow rate. It can be left unset, as it has a reasonable
+    from voltage to flow rate. The polynomial is written as the V^2 term,
+    then the V term, then the constant. It can be left unset, as it has a reasonable
     default value as follows::
     
     [calbox]
