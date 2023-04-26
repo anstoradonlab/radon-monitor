@@ -1067,8 +1067,12 @@ class DataStore(object):
             bg_cps = bgdict[detector_name]
 
             try:
-                cps = row['LLD_Tot'] / dt
-                ApproxRadon = (cps - bg_cps) / cal
+                # allow for None inputs column
+                if row['LLD_Tot'] is None or bg_cps is None or cal is None:
+                    ApproxRadon = math.nan
+                else:
+                    cps = row['LLD_Tot'] / dt
+                    ApproxRadon = (cps - bg_cps) / cal
             except Exception as ex:
                 ApproxRadon = math.nan
                 if report_conversion_error:
