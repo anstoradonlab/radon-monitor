@@ -1618,7 +1618,6 @@ class MockDataLoggerThread(DataLoggerThread):
         self._datalogger = MockCR1000()
         _logger.warning("*** Pretend connection to a datalogger ***")
 
-
 class DataMinderThread(DataThread):
     """
     This thread's job is to perform some maintainence tasks on the database

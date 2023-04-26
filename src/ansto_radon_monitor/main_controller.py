@@ -322,7 +322,13 @@ class MainController(object):
                 wait_list.append(itm)
         for itm in wait_list:
             _logger.info(f"Waiting for {itm.name}")
-            itm.join()
+            itm.join(timeout=30)
+            if itm.is_alive():
+                _logger.error(f'Thread {itm.name} is still running after waiting for 30s')
+                msg = "".join(
+                                traceback.format_stack(sys._current_frames()[itm.ident])
+                            )
+                _logger.error(f'Thread {itm.name} stack trace: {msg}')
 
         _logger.info("Shutting down datastore.")
         # this, the datastore, is in the main thread.  We're just closing the database.
