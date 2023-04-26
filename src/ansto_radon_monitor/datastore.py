@@ -991,6 +991,11 @@ class DataStore(object):
                 if ex.args == ("no such column: Datetime",):
                     _logger.warning(f"Datetime column not found in table {view_name}")
                     return None, []
+                # this can happen when there's no data in the table (e.g. maybe it's been miagrated into
+                # backups but the calibration unit has failed so isn't producing more data)
+                # sqlite3.OperationalError: no such column: None
+                if ex.args == ("no such column: None",):
+                    return None, []
                 else:
                     raise ex
         except sqlite3.OperationalError as ex:
@@ -1001,6 +1006,7 @@ class DataStore(object):
                 )
                 return None, []
             else:
+                _logger.error(f"sqlite3.OperationalError \"{ex}\" while executing sql: {sql}")
                 raise ex
         except sqlite3.ProgrammingError as ex:
             # sqlite3.ProgrammingError: Cannot operate on a closed database.
