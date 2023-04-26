@@ -7,6 +7,11 @@ Version 10.6
 ============
 not yet released
 
+  - Add an option to set the injection flow rate on a Burkert calibration box::
+
+      [calbox]
+      inject_flow_rate=0.5
+
   - Potential fix for issue #4 (calbox once failed to reset, and kept injecting)
   - Add the option to run without a calibration unit
       This adds a configuration option and handles

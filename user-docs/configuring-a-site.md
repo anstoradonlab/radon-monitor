@@ -154,8 +154,10 @@ inject_duration_sec=3600
 background_duration_sec=3600
 # ip address of the Burkert ME43 gateway (only applies when kind=BurkertModel1)
 me43_ip_address=192.168.0.100
-# flow rate setpoint on the calibration unit's mass flow controller (units of standard l/min)
+# flow rate setpoint on the calibration unit's mass flow controller during source flushing (units of standard l/min)
 flush_flow_rate=0.5 (only applies when kind=BurkertModel1)
+# flow rate setpoint on the calibration unit's mass flow controller during injection (units of standard l/min)
+inject_flow_rate=0.5 (only applies when kind=BurkertModel1)
 
 
 
