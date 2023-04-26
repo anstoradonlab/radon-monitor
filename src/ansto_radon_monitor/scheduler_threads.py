@@ -306,7 +306,7 @@ class CalibrationUnitThread(DataThread):
         self.name = "CalibrationUnitThread"
         self._device = None
         self._data_table_name = "CalibrationUnit"
-        self._kind = config.calbox.kind
+        self._kind = config.calbox.kind.lower()
         self._num_detectors = len(config.detectors)
         self._detector_names = [itm.name for itm in config.detectors]
         self._radon_source_activity_bq = config.calbox.radon_source_activity_bq
@@ -357,27 +357,28 @@ class CalibrationUnitThread(DataThread):
         self._thread_ident = threading.get_ident()
         with self._lock:
             try:
+                # Note: _kind is set to lower case during __init__
                 if self._kind == "mock":
                     self._device = CalBoxLabjack(
                         labjack_id=None, serialNumber=serialNumber
                     )
                 elif self._kind == "generic":
                     self._device = CalBoxLabjack(labjack_id, serialNumber=serialNumber, flow_sensor_polynomial=self._flow_sensor_polynomial)
-                elif self._kind == "CapeGrim":
+                elif self._kind == "capegrim":
                     self._device = CapeGrimLabjack(
                         labjack_id, serialNumber=serialNumber, flow_sensor_polynomial=self._flow_sensor_polynomial
                     )
-                elif self._kind == "burkertModel1":
+                elif self._kind == "burkertmodel1":
                     self._device = BurkertGateway(ip_address=ip_address, flush_flow_rate=flush_flow_rate)
                 elif self._kind == "none":
                     self._device = None
-                elif self._kind == "mockCapeGrim":
+                elif self._kind == "mockcapegrim":
                     self._device = CapeGrimLabjack(
                         labjack_id=None, serialNumber=serialNumber
                     )
                 else:
                     _logger.error(
-                        f"Unknown kind of calibration unit: {self._kind}.  Known kinds are: ['generic', 'burkertModel1', 'CapeGrim', 'mock', 'mockCapeGrim]"
+                        f"Unknown kind of calibration unit: {self._kind}.  Known kinds are: ['none', 'generic', 'burkertModel1', 'CapeGrim', 'mock', 'mockCapeGrim].  'Mock' kinds are intended for software development only."
                     )
                 # no exception - set the reconnect delay to default
                 self._reconnect_delay = 30
