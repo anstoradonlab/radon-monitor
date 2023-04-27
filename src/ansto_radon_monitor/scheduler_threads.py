@@ -417,7 +417,7 @@ class CalibrationUnitThread(DataThread):
                 # no exception - set the reconnect delay to default
                 self._reconnect_delay = 30
             except Exception as ex:
-                self._reconnect_delay = min(self._reconnect_delay * 2, 300)
+                self._reconnect_delay = min(self._reconnect_delay * 2, 1800)
                 self._schedule_connection(
                     labjack_id,
                     serialNumber,
