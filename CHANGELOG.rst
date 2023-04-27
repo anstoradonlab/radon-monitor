@@ -3,6 +3,13 @@ Changelog
 =========
 
 
+Version 10.7
+============
+Not yet released
+
+  - XXX
+
+
 Version 10.6
 ============
 27 April 2023
