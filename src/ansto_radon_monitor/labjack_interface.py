@@ -16,6 +16,25 @@ _logger = logging.getLogger(__name__)
 # reference for Labjack interface:
 #
 
+def get_u12_error_string(errorcode: int) -> str:
+    """Like u12.getErrorString, return a string description of an error
+
+    This is included because the u12 function has a bug where a unicode string is 
+    used instead of byte string, meaning that it doesn't work on Python 3.
+
+    Args:
+        errorcode (int): Error code from labjack library
+
+    Returns:
+        str: Description of the error
+    """
+    staticLib = u12.staticLib
+    # this line has the change, b" "*50 instead of " "*50
+    errorString = ctypes.c_char_p(b" "*50)
+    staticLib.GetErrorString(errorcode, errorString)
+    # also different - conversion from bytes to str
+    return str(errorString.value, 'ascii')
+
 
 def bool_list_to_int(a):
     """
@@ -87,8 +106,15 @@ class LabjackWrapper:
             except Exception as ex:
                 _logger.error(f"Error calling reset_dio(): {ex}")
                 raise
+        except u12.U12Exception as ex:
+            error_txt = ""
+            if len(ex.args) == 1:
+                error_txt = '(' + get_u12_error_string(int(ex.args[0])) + ')'
+            _logger.error(f"Unable to connect to labjack because of error: {ex} {error_txt}")
+            raise
         except Exception as ex:
             _logger.error(f"Unable to connect to labjack because of error: {ex}")
+            raise
 
     def set_digital_outputs(self, state: List[bool]):
         """
