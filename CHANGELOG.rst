@@ -45,6 +45,17 @@ Version 10.6
     [calbox]
     flow_sensor_polynomial=0.1025, -0.17965, 0.0669979
 
+    Some calibration boxes use compressed gas with a mass flow controller 
+    (MFC, instead of a flow meter).  The MFC
+    is configured with flow rate as an analog output.  0..5V represents
+    0..500 cc/min, so for these calibration boxes set::
+
+    [calbox]
+    flow_sensor_polynomial=0.0, 0.1, 0.0
+
+    In between calibration cycles, the MFC is powered off and the reported
+    values have no useful meaning.
+
   - log the clock offset, even when it badly out of sync (more than 1 minute)
   - Add countdown dialog to GUI during startup
   - set default baud rate to 9600 to make communications as robust as possible.
