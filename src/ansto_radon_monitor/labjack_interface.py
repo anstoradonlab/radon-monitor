@@ -102,7 +102,9 @@ class LabjackWrapper:
 
         state must have length of 16
         """
-        _logger.debug(f"Setting digital outputs to: {state}")
+        bool_repr = {True: 'T', False: 'F'}
+        state_txt = "".join([bool_repr[itm] for itm in state])
+        _logger.debug(f"Setting digital outputs to: {state_txt}")
         d = self.device
         assert len(state) == 16
         assert (self._thread_id == threading.get_ident())
