@@ -348,6 +348,8 @@ class CalBoxLabjack(CalboxDevice):
         self._thread_id = threading.get_ident()
         # initialise some flags on the computer-side (no comms)
         self._init_flags()
+        # placeholder for labjack interface
+        self.lj = None
 
         self._ljlock = threading.RLock()
 
@@ -493,8 +495,9 @@ class CalBoxLabjack(CalboxDevice):
     @property
     def status(self):
         """generate a human-readable status message based on DIO flags"""
-        # force a read from the device
-        _device_states = self.lj.dio_states
+        if self.lj is not None:
+            # force a read from the device
+            _device_states = self.lj.dio_states
         flags = [
             self.digital_output_state["ActivatePump"],
             self.digital_output_state["ActivateInject"],
