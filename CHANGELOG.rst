@@ -7,79 +7,78 @@ Version 10.7
 ============
 Not yet released
 
-  - XXX
+- Interpret LabJack errors in the logfile, e.g. "2" becomes "No LabJacks found."
 
 
 Version 10.6
 ============
 27 April 2023
 
-  - Fix an issue where a disconnected calibration unit will eventually crash the
-    logging software 
-  - Add an option to set the injection flow rate on a Burkert calibration box::
+- Fix an issue where a disconnected calibration unit will eventually crash the
+  logging software 
+- Add an option to set the injection flow rate on a Burkert calibration box::
 
-      [calbox]
-      inject_flow_rate=0.5
-      flush_flow_rate=0.5
+    [calbox]
+    inject_flow_rate=0.5
+    flush_flow_rate=0.5
 
-  - Potential fix for issue #4 (calbox once failed to reset, and kept injecting)
-  - Add the option to run without a calibration unit
-      This adds a configuration option and handles
-      the absence of a calibration unit::
-      
-      [calbox]
-      kind=none
-      
-  - Added calibrated flow to CalibrationUnit table
+- Potential fix for issue #4 (calbox once failed to reset, and kept injecting)
+- Add the option to run without a calibration unit
+  This adds a configuration option and handles
+  the absence of a calibration unit::
 
-    The CalibrationUnit table now includes the calibrated flow rate
-    in a field called `Flow_lpm` in addition to the existing `Flow`
-    column which records the voltage of the flow rate transmiter, a
-    Honeywell AWM3100.
+    [calbox]
+    kind=none
 
-    There is a new configuration option to control the conversion
-    from voltage to flow rate. The polynomial is written as the V^2 term,
-    then the V term, then the constant. It can be left unset, as it has a reasonable
-    default value as follows::
-    
+- Added calibrated flow to CalibrationUnit table
+
+  The CalibrationUnit table now includes the calibrated flow rate
+  in a field called `Flow_lpm` in addition to the existing `Flow`
+  column which records the voltage of the flow rate transmiter, a
+  Honeywell AWM3100.
+
+  There is a new configuration option to control the conversion
+  from voltage to flow rate. The polynomial is written as the V^2 term,
+  then the V term, then the constant. It can be left unset, as it has a reasonable
+  default value as follows::
+  
     [calbox]
     flow_sensor_polynomial=0.1025, -0.17965, 0.0669979
 
-    Some calibration boxes use compressed gas with a mass flow controller 
-    (MFC, instead of a flow meter).  The MFC
-    is configured with flow rate as an analog output.  0..5V represents
-    0..500 cc/min, so for these calibration boxes set::
+  Some calibration boxes use compressed gas with a mass flow controller 
+  (MFC, instead of a flow meter).  The MFC
+  is configured with flow rate as an analog output.  0..5V represents
+  0..500 cc/min, so for these calibration boxes set::
 
     [calbox]
     flow_sensor_polynomial=0.0, 0.1, 0.0
 
-    In between calibration cycles, the MFC is powered off and the reported
-    values have no useful meaning.
+  In between calibration cycles, the MFC is powered off and the reported
+  values have no useful meaning.
 
-  - log the clock offset, even when it badly out of sync (more than 1 minute)
-  - Add countdown dialog to GUI during startup
-  - set default baud rate to 9600 to make communications as robust as possible.
-    Users can still change the baudrate if their setup supports higher baudrates.
-  
-  - add option to report PakBus statistics (currently on disconnect and hourly, 
-    default is False)::
+- log the clock offset, even when it badly out of sync (more than 1 minute)
+- Add countdown dialog to GUI during startup
+- set default baud rate to 9600 to make communications as robust as possible.
+  Users can still change the baudrate if their setup supports higher baudrates.
+
+- add option to report PakBus statistics (currently on disconnect and hourly, 
+  default is False)::
 
     [detector1]
     report_pakbus_statistics=True
-
 
 Version 10.5
 ============
 13 February 2023
 
- - Bugfix relese: keep running when csv sync fails (just log the error)
+- Bugfix relese: keep running when csv sync fails (just log the error)
 
 Version 10.4
 ============
 14 December 2022
 
- - Support for Burkert calibration unit
- - Calculate radon concentration when reading Results table and report in an `ApproxRadon`` column
+- Support for Burkert calibration unit
+- Calculate radon concentration when reading Results table and report in an `ApproxRadon`` column
 
 Version 10.3
 ============
@@ -107,11 +106,11 @@ Version 10.2
 - A banner display is shown at the top of the app during calibration or background
 - Write a summary message to LogMessages at the end of a complete calibration or background, e.g.::
 
-  {"EventType": "Calibration", 
-  "FlushStart": "2022-10-20 22:46:15+00:00", 
-  "Start": "2022-10-20 22:46:15+00:00", 
-  "Stop": "2022-10-20 22:46:15+00:00", 
-  "DetectorName": "HURD"}
+    {"EventType": "Calibration", 
+    "FlushStart": "2022-10-20 22:46:15+00:00", 
+    "Start": "2022-10-20 22:46:15+00:00", 
+    "Stop": "2022-10-20 22:46:15+00:00", 
+    "DetectorName": "HURD"}
 
 - Display 24h of data in the RTV (10-sec) display
 - Keep tables scrolled to the bottom in GUI, unless the user scrolls up
