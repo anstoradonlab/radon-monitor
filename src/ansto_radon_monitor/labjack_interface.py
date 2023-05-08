@@ -482,8 +482,8 @@ class CalBoxLabjack(CalboxDevice):
             for k, state in self.digital_output_state.items():
                 channel = self.digital_output_channel[k]
                 all_states[channel] = state
-                with self._ljlock:
-                    self.lj.set_digital_outputs(all_states)
+            with self._ljlock:
+                self.lj.set_digital_outputs(all_states)
             _logger.debug(
                 f"Labjack digital output ports set: {self.digital_output_state.items()}"
             )
