@@ -302,10 +302,18 @@ class LabjackWrapper:
                 _logger.error(
                     f"Labjack reports IDNUM={a_in['idnum']} but we expected {d.id}"
                 )
-            
+        
+        except u12.U12Exception as ex:
+            error_txt = ""
+            if len(ex.args) == 1:
+                error_txt = '(' + get_u12_error_string(int(ex.args[0])) + ')'
+            _logger.error(f"Error reading from labjack analogue channels: {ex} {error_txt}")
+            voltages = [math.nan, math.nan]
+            success = False
+
         except Exception as ex:
             _logger.error(f"Error reading from labjack analogue channels: {ex}")
-            voltages = [None, None]
+            voltages = [math.nan, math.nan]
             success = False
         
         if not success and retries > 0:
