@@ -35,7 +35,7 @@ class BurkertGateway(CalboxDevice):
     MFC_DEFAULT_FLOW = 0.5 # L/min
     BYTEORDER = {"byteorder":Endian.Big, "wordorder":Endian.Big}
 
-    def __init__(self, ip_address: str, flush_flow_rate: float):
+    def __init__(self, ip_address: str, flush_flow_rate: float, inject_flow_rate: float):
         """
         Control a Burket calibration unit.
 
@@ -88,9 +88,14 @@ class BurkertGateway(CalboxDevice):
         _logger.info(f"Trying to connect to Burkert Calbox at IP address {ip_address}")
         self._ip_address = ip_address
         if flush_flow_rate is not None:
-            self._mfc_setpoint = flush_flow_rate
+            self._mfc_setpoint_flush = flush_flow_rate
         else:
-            self._mfc_setpoint = self.MFC_DEFAULT_FLOW
+            self._mfc_setpoint_flush = self.MFC_DEFAULT_FLOW
+        if inject_flow_rate is not None:
+            self._mfc_setpoint_inject = inject_flow_rate
+        else:
+            self._mfc_setpoint_inject = self.MFC_DEFAULT_FLOW
+
         self.serial_number = None
         # this is able to connect even if ip_address is wrong
         # (but will fail later)
@@ -200,7 +205,7 @@ class BurkertGateway(CalboxDevice):
         flags[2] = False
         flags[3] = False
         self._set_flags(flags)
-        self._set_mfc_flowrate(self._mfc_setpoint)
+        self._set_mfc_flowrate(self._mfc_setpoint_flush)
 
     def inject(self, detector_idx: int = 0) -> None:
         """Inject radon from source
@@ -218,7 +223,7 @@ class BurkertGateway(CalboxDevice):
         # make sure this detector is switched out of background
         flags[bg_idx] = False
         self._set_flags(flags)
-        self._set_mfc_flowrate(self._mfc_setpoint)
+        self._set_mfc_flowrate(self._mfc_setpoint_inject)
 
     def reset_flush(self) -> None:
         """Exit from source-flush mode"""

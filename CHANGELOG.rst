@@ -3,9 +3,24 @@ Changelog
 =========
 
 
+Version 10.7
+============
+Not yet released
+
+  - XXX
+
+
 Version 10.6
 ============
-not yet released
+27 April 2023
+
+  - Fix an issue where a disconnected calibration unit will eventually crash the
+    logging software 
+  - Add an option to set the injection flow rate on a Burkert calibration box::
+
+      [calbox]
+      inject_flow_rate=0.5
+      flush_flow_rate=0.5
 
   - Potential fix for issue #4 (calbox once failed to reset, and kept injecting)
   - Add the option to run without a calibration unit
@@ -23,11 +38,23 @@ not yet released
     Honeywell AWM3100.
 
     There is a new configuration option to control the conversion
-    from voltage to flow rate. It can be left unset, as it has a reasonable
+    from voltage to flow rate. The polynomial is written as the V^2 term,
+    then the V term, then the constant. It can be left unset, as it has a reasonable
     default value as follows::
     
     [calbox]
     flow_sensor_polynomial=0.1025, -0.17965, 0.0669979
+
+    Some calibration boxes use compressed gas with a mass flow controller 
+    (MFC, instead of a flow meter).  The MFC
+    is configured with flow rate as an analog output.  0..5V represents
+    0..500 cc/min, so for these calibration boxes set::
+
+    [calbox]
+    flow_sensor_polynomial=0.0, 0.1, 0.0
+
+    In between calibration cycles, the MFC is powered off and the reported
+    values have no useful meaning.
 
   - log the clock offset, even when it badly out of sync (more than 1 minute)
   - Add countdown dialog to GUI during startup

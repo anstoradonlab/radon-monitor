@@ -55,6 +55,7 @@ def approx_tstr(t: datetime.datetime):
     tfmt = "%Y-%m-%d %H:%M%Z"
     return t.strftime(tfmt)
 
+
 def round_seconds(t: datetime.datetime) -> datetime.datetime:
     """Round a datetime to the nearest second"""
     if t.microsecond >= 500_000:
@@ -235,7 +236,6 @@ class DataThread(threading.Thread):
             action=self.run_measurement,
         )
 
-
     def run(self):
         try:
             _logger.debug(f"{self.name} has started running")
@@ -260,8 +260,8 @@ class DataThread(threading.Thread):
                     _logger.debug(f"Time until next event: {time_until_next_event}")
 
                     assert time_until_next_event >= 0
-                    #_logger.debug(f"Q: {self._scheduler.queue}")
-                    #_logger.debug(f"Task Queue: {self.task_queue}")
+                    # _logger.debug(f"Q: {self._scheduler.queue}")
+                    # _logger.debug(f"Task Queue: {self.task_queue}")
 
             _logger.debug(f"{self.name} has finished and will call shutdown_func()")
             self.shutdown_func()
@@ -312,6 +312,7 @@ class CalibrationUnitThread(DataThread):
         self._radon_source_activity_bq = config.calbox.radon_source_activity_bq
         self._ip_address = config.calbox.me43_ip_address
         self._flush_flow_rate = config.calbox.flush_flow_rate
+        self._inject_flow_rate = config.calbox.inject_flow_rate
         self._flow_sensor_polynomial = config.calbox.flow_sensor_polynomial
 
         # lower numbers are higher priority
@@ -328,7 +329,14 @@ class CalibrationUnitThread(DataThread):
         if config.calbox.kind == "mock":
             labjack_id = None
 
-        self._schedule_connection(labjack_id, serialNumber, self._ip_address, self._flush_flow_rate, delay=0)
+        self._schedule_connection(
+            labjack_id,
+            serialNumber,
+            self._ip_address,
+            self._flush_flow_rate,
+            self._inject_flow_rate,
+            delay=0,
+        )
 
         # ensure that the scheduler function is run immediately on startup
         self.state_changed.set()
@@ -338,7 +346,15 @@ class CalibrationUnitThread(DataThread):
             if itm.priority == task_priority:
                 self._scheduler.cancel(itm)
 
-    def _schedule_connection(self, labjack_id, serialNumber, ip_address="", flush_flow_rate=None, delay=10):
+    def _schedule_connection(
+        self,
+        labjack_id,
+        serialNumber,
+        ip_address="",
+        flush_flow_rate=None,
+        inject_flow_rate=None,
+        delay=10,
+    ):
         # cancel any current cal/bg tasks
         self._cancel_tasks(self._calibration_tasks_priority)
         self._cancel_tasks(self._background_tasks_priority)
@@ -349,11 +365,19 @@ class CalibrationUnitThread(DataThread):
             delay=delay,
             priority=self._connection_task_priority,  # high priority - needs to happend before anything else will work
             action=self.connect_to_device,
-            kwargs={"labjack_id": labjack_id, "serialNumber": serialNumber, "ip_address":ip_address, "flush_flow_rate":flush_flow_rate},
+            kwargs={
+                "labjack_id": labjack_id,
+                "serialNumber": serialNumber,
+                "ip_address": ip_address,
+                "flush_flow_rate": flush_flow_rate,
+                "inject_flow_rate": inject_flow_rate,
+            },
         )
 
     @task_description("Calibration unit: initialize")
-    def connect_to_device(self, labjack_id, serialNumber, ip_address, flush_flow_rate):
+    def connect_to_device(
+        self, labjack_id, serialNumber, ip_address, flush_flow_rate, inject_flow_rate
+    ):
         self._thread_ident = threading.get_ident()
         with self._lock:
             try:
@@ -363,13 +387,23 @@ class CalibrationUnitThread(DataThread):
                         labjack_id=None, serialNumber=serialNumber
                     )
                 elif self._kind == "generic":
-                    self._device = CalBoxLabjack(labjack_id, serialNumber=serialNumber, flow_sensor_polynomial=self._flow_sensor_polynomial)
+                    self._device = CalBoxLabjack(
+                        labjack_id,
+                        serialNumber=serialNumber,
+                        flow_sensor_polynomial=self._flow_sensor_polynomial,
+                    )
                 elif self._kind == "capegrim":
                     self._device = CapeGrimLabjack(
-                        labjack_id, serialNumber=serialNumber, flow_sensor_polynomial=self._flow_sensor_polynomial
+                        labjack_id,
+                        serialNumber=serialNumber,
+                        flow_sensor_polynomial=self._flow_sensor_polynomial,
                     )
                 elif self._kind == "burkertmodel1":
-                    self._device = BurkertGateway(ip_address=ip_address, flush_flow_rate=flush_flow_rate)
+                    self._device = BurkertGateway(
+                        ip_address=ip_address,
+                        flush_flow_rate=flush_flow_rate,
+                        inject_flow_rate=inject_flow_rate,
+                    )
                 elif self._kind == "none":
                     self._device = None
                 elif self._kind == "mockcapegrim":
@@ -383,12 +417,28 @@ class CalibrationUnitThread(DataThread):
                 # no exception - set the reconnect delay to default
                 self._reconnect_delay = 30
             except Exception as ex:
-                self._reconnect_delay = min(self._reconnect_delay*2, 300)
-                self._schedule_connection(labjack_id, serialNumber, ip_address=ip_address, flush_flow_rate=flush_flow_rate, delay=self._reconnect_delay)
-                _logger.error(
-                    "Unable to connect to calibration system using "
-                    f"ID: {labjack_id} serial: {serialNumber} ip address: {ip_address} because of error: {ex}.  Retrying in {self._reconnect_delay}sec."
+                self._reconnect_delay = min(self._reconnect_delay * 2, 1800)
+                self._schedule_connection(
+                    labjack_id,
+                    serialNumber,
+                    ip_address=ip_address,
+                    flush_flow_rate=flush_flow_rate,
+                    inject_flow_rate=inject_flow_rate,
+                    delay=self._reconnect_delay,
                 )
+                if 'burkert' in self._kind.lower():
+                    # burkert-based, report ip address info
+                    _logger.error(
+                        "Unable to connect to calibration system using "
+                        f"IP address: {ip_address} because of error: {ex}.  Retrying in {self._reconnect_delay} sec."
+                    )
+                else:
+                    # labjack-based, report labjack info
+                    _logger.error(
+                        "Unable to connect to calibration system using "
+                        f"ID: {labjack_id} serial: {serialNumber} because of error: {ex}.  Retrying in {self._reconnect_delay} sec."
+                    )
+
 
     @task_description("Calibration unit: flush source")
     def set_flush_state(self):
@@ -415,7 +465,13 @@ class CalibrationUnitThread(DataThread):
                 f"{traceback.format_exc()}"
             )
             self._device = None
-            self._schedule_connection(self._init_labjack_id, self._init_serialNumber, self._ip_address, self._flush_flow_rate)
+            self._schedule_connection(
+                self._init_labjack_id,
+                self._init_serialNumber,
+                self._ip_address,
+                self._flush_flow_rate,
+                self._inject_flow_rate
+            )
 
     @task_description("Calibration unit: inject from source")
     def set_inject_state(self, detector_idx=0):
@@ -449,17 +505,20 @@ class CalibrationUnitThread(DataThread):
         self._run_or_reset(self._device.reset_all, "return to normal operation")
         if log_data is not None:
             json_log_data = json.dumps(log_data, default=str)
-            detector_name = log_data.get('DetectorName', None)
-            self._datastore.add_log_message("CalibrationEventSummary", json_log_data, detector_name=detector_name)
+            detector_name = log_data.get("DetectorName", None)
+            self._datastore.add_log_message(
+                "CalibrationEventSummary", json_log_data, detector_name=detector_name
+            )
 
     def set_nonbackground_state(self, log_data=None):
         self._datastore.add_log_message("CalibrationEvent", f"Left background state")
         self._run_or_reset(self._device.reset_background, "leave background state")
         if log_data is not None:
             json_log_data = json.dumps(log_data, default=str)
-            detector_name = log_data.get('DetectorName', None)
-            self._datastore.add_log_message("CalibrationEventSummary", json_log_data, detector_name=detector_name)
-
+            detector_name = log_data.get("DetectorName", None)
+            self._datastore.add_log_message(
+                "CalibrationEventSummary", json_log_data, detector_name=detector_name
+            )
 
     def set_noncalibration_state(self):
         self._datastore.add_log_message("CalibrationEvent", f"Left calibration state")
@@ -488,7 +547,9 @@ class CalibrationUnitThread(DataThread):
         try:
             self._device.reset_all()
         except Exception as ex:
-            _logger.error(f"Error reseting Calbox Device: {ex}, {traceback.format_exc()}")
+            _logger.error(
+                f"Error reseting Calbox Device: {ex}, {traceback.format_exc()}"
+            )
 
     # don't include this function in the list of tasks
     # @task_description("Calibration unit: measure state")
@@ -547,7 +608,9 @@ class CalibrationUnitThread(DataThread):
                 initial_delay_seconds = 0
             #
             # begin flushing
-            t_inj = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=initial_delay_seconds)
+            t_inj = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(
+                seconds=initial_delay_seconds
+            )
             self._scheduler.enter(
                 delay=initial_delay_seconds,
                 priority=p,
@@ -575,7 +638,9 @@ class CalibrationUnitThread(DataThread):
                 delay_inject_start = flush_duration + initial_delay_seconds
 
             # start injection
-            t0 = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=delay_inject_start)
+            t0 = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(
+                seconds=delay_inject_start
+            )
             info_message = f"Expecting to start injecting radon ({self._detector_names[detector_idx]}) at: {approx_tstr(t0)}"
             _logger.info(info_message)
             self._scheduler.enter(
@@ -587,7 +652,9 @@ class CalibrationUnitThread(DataThread):
 
             # stop injection
             delay_inject_stop = delay_inject_start + inject_duration
-            t1 = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=delay_inject_stop)
+            t1 = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(
+                seconds=delay_inject_stop
+            )
             info_message = f"Expecting to stop injecting radon ({self._detector_names[detector_idx]}) at: {approx_tstr(t1)}"
             _logger.info(info_message)
 
@@ -599,14 +666,14 @@ class CalibrationUnitThread(DataThread):
                 "Start": round_seconds(t0),
                 "Stop": round_seconds(t1),
                 "DetectorName": self._detector_names[detector_idx],
-                "SourceActivity": self._radon_source_activity_bq
+                "SourceActivity": self._radon_source_activity_bq,
             }
 
             self._scheduler.enter(
                 delay=delay_inject_stop,
                 priority=p,
                 action=self.set_default_state,
-                kwargs={'log_data': calibration_summary}
+                kwargs={"log_data": calibration_summary},
             )
 
             self.state_changed.set()
@@ -648,7 +715,9 @@ class CalibrationUnitThread(DataThread):
                 initial_delay_seconds = 0
             #
             # begin background
-            t0 = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=initial_delay_seconds)
+            t0 = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(
+                seconds=initial_delay_seconds
+            )
             info_message = f"Expecting to start background ({self._detector_names[detector_idx]}) at: {approx_tstr(t0)}"
             _logger.info(info_message)
             self._scheduler.enter(
@@ -658,7 +727,9 @@ class CalibrationUnitThread(DataThread):
                 argument=(detector_idx,),
             )
             # reset the background flags
-            t1 = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=initial_delay_seconds + duration)
+            t1 = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(
+                seconds=initial_delay_seconds + duration
+            )
             info_message = f"Expecting to stop background ({self._detector_names[detector_idx]}) at: {approx_tstr(t1)}"
             # if the calibration event is not cancelled, this is the summary metadata which will be
             # written to the database
@@ -674,7 +745,7 @@ class CalibrationUnitThread(DataThread):
                 delay=initial_delay_seconds + duration,
                 priority=p,
                 action=self.set_nonbackground_state,
-                kwargs={'log_data': background_summary}
+                kwargs={"log_data": background_summary},
             )
 
             self.state_changed.set()
@@ -830,7 +901,6 @@ class CalibrationUnitThread(DataThread):
                 if status is None:
                     status = {}
                     status["message"] = "no connection"
-            
 
         return status
 
@@ -870,7 +940,9 @@ class CalibrationUnitThread(DataThread):
         return False
 
 
-def fix_record(record: Dict, time_offset: datetime.timedelta=datetime.timedelta(seconds=0)):
+def fix_record(
+    record: Dict, time_offset: datetime.timedelta = datetime.timedelta(seconds=0)
+):
     """fix a record from cr1000
 
     Parameters
@@ -885,7 +957,7 @@ def fix_record(record: Dict, time_offset: datetime.timedelta=datetime.timedelta(
     Dict
         Data record, with time offset removed, timezone info added, and
         some "Bytes" issues fixed
-    """    
+    """
     r = {}
     for k, v in record.items():
         # work around (possible but not observed) problem
@@ -902,7 +974,7 @@ def fix_record(record: Dict, time_offset: datetime.timedelta=datetime.timedelta(
         # Define the timestamp as utc and subtract offset
         if k == "Datetime":
             r[k] = r[k].replace(tzinfo=datetime.timezone.utc) - time_offset
-    # special case, multiple head detector fields like LLD(1), LLD(2), ...    
+    # special case, multiple head detector fields like LLD(1), LLD(2), ...
     if "HV(1)" in r.keys() or "HV_Avg(1)" in r.keys():
         if "HV_Avg(1)" in r.keys():
             suffix_av = "_Avg"
@@ -911,34 +983,36 @@ def fix_record(record: Dict, time_offset: datetime.timedelta=datetime.timedelta(
             suffix_av = ""
             suffix_tot = ""
         try:
-            k_summary = "LLD"+suffix_tot
+            k_summary = "LLD" + suffix_tot
             if not k_summary in r:
                 cols = [k for k in r if k.startswith("LLD") and k.endswith(")")]
                 if len(cols) > 0:
                     r[k_summary] = np.sum([r[k] for k in cols])
-            k_summary = "ULD"+suffix_tot
+            k_summary = "ULD" + suffix_tot
             if not k_summary in r:
                 cols = [k for k in r if k.startswith("ULD") and k.endswith(")")]
                 if len(cols) > 0:
                     r[k_summary] = np.sum([r[k] for k in cols])
-            k_summary = "HV"+suffix_av
+            k_summary = "HV" + suffix_av
             if not k_summary in r:
                 cols = [k for k in r if k.startswith("HV") and k.endswith(")")]
                 if len(cols) > 0:
                     r[k_summary] = np.mean([r[k] for k in cols])
-            k_summary = "InFlow"+suffix_av
+            k_summary = "InFlow" + suffix_av
             if not k_summary in r:
                 cols = [k for k in r if k.startswith("InFl") and k.endswith(")")]
                 if len(cols) > 0:
                     r[k_summary] = np.mean([r[k] for k in cols])
         except Exception as ex:
-            _logger.error(f"Error adding summary information to record.  Data: {record}, Error: {ex}")
+            _logger.error(
+                f"Error adding summary information to record.  Data: {record}, Error: {ex}"
+            )
 
     if "HV(1)" in r.keys() or "HV_Avg(1)" in r.keys():
         # rename HV(1) etc to HV1, HV2
         new_r = {}
-        for k,v in r.items():
-            new_k = k.replace('(','').replace(')','')
+        for k, v in r.items():
+            new_k = k.replace("(", "").replace(")", "")
             new_r[new_k] = v
         r = new_r
 
@@ -977,10 +1051,14 @@ class DataLoggerThread(DataThread):
         )
 
         # set default values for cal and bg coefficients in persistent state
-        detector_volumes = {"L100":0.1,"L200":0.2,"L1500":1.5,"L5000":5.0}
+        detector_volumes = {"L100": 0.1, "L200": 0.2, "L1500": 1.5, "L5000": 5.0}
         detector_volume = detector_volumes.get(detector_config.kind, 1.0)
         default_cal = 0.2 * detector_volume
-        default_bg_cps = 100.0/30.0/60.0 * 7 if detector_config.kind == "L5000" else 100.0/30.0/60.0
+        default_bg_cps = (
+            100.0 / 30.0 / 60.0 * 7
+            if detector_config.kind == "L5000"
+            else 100.0 / 30.0 / 60.0
+        )
         k = self.detectorName + " sensitivity"
         cal = self._datastore.get_state(k)
         if cal is None:
@@ -1012,7 +1090,7 @@ class DataLoggerThread(DataThread):
         # to a larger value once connected
         ser.timeout = 4
         # on one of the serial-to-usb drivers that I've used, it seems to be a bad idea to read from
-        # the port right after changing the timeout - add a delay here to (hopefully) avoid this 
+        # the port right after changing the timeout - add a delay here to (hopefully) avoid this
         # issue
         time.sleep(0.25)
 
@@ -1039,12 +1117,12 @@ class DataLoggerThread(DataThread):
             s = f"Error loading RTV from database (data display may show invalid data for the next 30 minutes): {ex} "
             s += traceback.format_exc()
             _logger.error(s)
-    
+
     def _report_pakbus_stats(self, force=False):
         """report pakbus packet statistics to logger.info hourly
 
         Args:
-            force (bool, optional): 
+            force (bool, optional):
             Force output of statistics, even if the hour isn't up. Defaults to False.
         """
         # datalogger not connected
@@ -1065,7 +1143,7 @@ class DataLoggerThread(DataThread):
         # do it
         report_txt = self._datalogger.pakbus.stats.summary()
         self._datalogger.pakbus.stats.reset()
-        _logger.info(report_txt)   
+        _logger.info(report_txt)
 
     def shutdown_func(self):
         # the CR1000 finalizer (__del__) closes the port and
@@ -1088,7 +1166,7 @@ class DataLoggerThread(DataThread):
                 elif hasattr(device.pakbus.link, "close"):
                     # connection is using a pyserial object
                     device.pakbus.link.close()
-                    
+
             except Exception as ex:
                 _logger.error(f"Error while trying to close serial port: {ex}")
 
@@ -1100,8 +1178,8 @@ class DataLoggerThread(DataThread):
         )
 
         # Simulated error
-        #import random
-        #if random.random() > 0.5:
+        # import random
+        # if random.random() > 0.5:
         #    raise RuntimeError("Pretend error during re-connection")
 
     @task_description("Data logger: initialize")
@@ -1125,8 +1203,8 @@ class DataLoggerThread(DataThread):
                         kwargs={"detector_config": detector_config},
                     )
                     # make re-connect delay longer in case of failure
-                    # up to a maximum of 300 seconds
-                    self._reconnect_delay = min(self._reconnect_delay*2, 300)
+                    # up to a maximum of 30 minutes
+                    self._reconnect_delay = min(self._reconnect_delay * 2, 60*30)
                     return
 
                 # connect can take a long time, but this is Ok
@@ -1150,7 +1228,9 @@ class DataLoggerThread(DataThread):
                             f"Datalogger found, but serial number does not match configuration (required serial: {detector_config.serial}, discovered serial: {self.status['serial'] }"
                         )
                         self._datalogger.close()
-                        self.status["link"] = "disconnected: datalogger has the wrong serial"
+                        self.status[
+                            "link"
+                        ] = "disconnected: datalogger has the wrong serial"
                         # TODO: the user needs to be informed of this more clearly
 
                 if hasattr(self._datalogger.pakbus.link, "baudrate"):
@@ -1164,7 +1244,9 @@ class DataLoggerThread(DataThread):
                 )
 
         except Exception as ex:
-            _logger.error(f"Error finalising connection to datalogger: {ex} {traceback.format_exc()}")
+            _logger.error(
+                f"Error finalising connection to datalogger: {ex} {traceback.format_exc()}"
+            )
             self.reconnect_func()
 
     def measurement_func(self):
@@ -1178,8 +1260,8 @@ class DataLoggerThread(DataThread):
         self.status["link"] = "retrieving data"
         with self._lock:
             # simulate an intermittent error
-            #import random
-            #if random.random() > 0.9:
+            # import random
+            # if random.random() > 0.9:
             #    raise RuntimeError("This is not a real error")
             for table_name in self.tables:
                 destination_table_name = self._rename_table.get(table_name, table_name)
@@ -1241,7 +1323,7 @@ class DataLoggerThread(DataThread):
             finally:
                 self.update_heartbeat_time()
                 self.max_heartbeat_age_seconds = saved_max_hb_age
-        
+
         # This function will only do something when the hour rolls over
         self._report_pakbus_stats()
 
@@ -1302,38 +1384,49 @@ class DataLoggerThread(DataThread):
                         try:
                             lld_total = sum([itm["LLD"] for itm in self._rtv_buffer])
                         except KeyError:
-                            lld_total = '---'
+                            lld_total = "---"
                         try:
                             uld_total = sum([itm["ULD"] for itm in self._rtv_buffer])
                         except KeyError:
-                            uld_total = '---'
+                            uld_total = "---"
                         try:
-                            exflow_total = sum([itm["ExFlow"] for itm in self._rtv_buffer])
+                            exflow_total = sum(
+                                [itm["ExFlow"] for itm in self._rtv_buffer]
+                            )
                         except KeyError:
-                            exflow_total = '---'
+                            exflow_total = "---"
                         values = [lld_total, uld_total, exflow_total]
 
                 # other values are just taken from the most recent info
                 def converter(k):
                     """return the correct conversion function for key "k" """
                     do_nothing = lambda x: x
-                    if k.startswith("LLD") or k.startswith("ULD") or k.startswith("Press"):
+                    if (
+                        k.startswith("LLD")
+                        or k.startswith("ULD")
+                        or k.startswith("Press")
+                    ):
                         c = int
-                    elif k.startswith("HV") or k.startswith("InFlow") or k.startswith("ExFlow"):
+                    elif (
+                        k.startswith("HV")
+                        or k.startswith("InFlow")
+                        or k.startswith("ExFlow")
+                    ):
                         c = lambda x: round(x, 1)
                     else:
                         c = do_nothing
                     return c
+
                 values = values + [recent_data.get(k, "---") for k in info["var"][3:]]
                 # round-off values, etc
                 values_formatted = []
-                for k,v in zip(info["var"], values):
+                for k, v in zip(info["var"], values):
                     try:
                         cv = converter(k)(v)
                     except:
                         cv = v
                     values_formatted.append(cv)
-                
+
                 # pressure, convert from Pa to hPa
                 ### - no, this conversion happens already
                 ### values[-1] = round(values[-1] / 100.0, 1)
@@ -1367,9 +1460,15 @@ class DataLoggerThread(DataThread):
         # measure the length of time required to query the datalogger clock
         # -- first query it, in case of slow response due to power saving
         # -- mode or some such
-        t_datalogger = self._datalogger.gettime().replace(tzinfo=datetime.timezone.utc) - time_offset
+        t_datalogger = (
+            self._datalogger.gettime().replace(tzinfo=datetime.timezone.utc)
+            - time_offset
+        )
         tick = time.time()
-        t_datalogger = self._datalogger.gettime().replace(tzinfo=datetime.timezone.utc) - time_offset
+        t_datalogger = (
+            self._datalogger.gettime().replace(tzinfo=datetime.timezone.utc)
+            - time_offset
+        )
         t_computer = datetime.datetime.now(datetime.timezone.utc)
         tock = time.time()
         time_required_for_query = tock - tick
@@ -1618,6 +1717,7 @@ class MockDataLoggerThread(DataLoggerThread):
         self._datalogger = MockCR1000()
         _logger.warning("*** Pretend connection to a datalogger ***")
 
+
 class DataMinderThread(DataThread):
     """
     This thread's job is to perform some maintainence tasks on the database
@@ -1664,15 +1764,14 @@ class DataMinderThread(DataThread):
 
         # ensure that the scheduler function is run immediately on startup
         self.state_changed.set()
-    
+
     def schedule_database_tasks(self, delay_seconds=0):
         # run the database tasks once, via the scheduler
         self._scheduler.enter(
             delay=delay_seconds,
             priority=0,
             action=self.run_database_tasks,
-            kwargs={"backup_time_of_day": None,
-                    "reschedule": False},
+            kwargs={"backup_time_of_day": None, "reschedule": False},
         )
 
     def backup_active_database(self, backup_filename=None):
@@ -1680,7 +1779,9 @@ class DataMinderThread(DataThread):
             with self._backup_lock:
                 self._datastore.backup_active_database(backup_filename)
         except Exception as ex:
-            _logger.error(f"Error backing up active database: {ex}, {traceback.format_exc()}")
+            _logger.error(
+                f"Error backing up active database: {ex}, {traceback.format_exc()}"
+            )
             raise
 
     def archive_data(self, data_dir):
@@ -1691,7 +1792,6 @@ class DataMinderThread(DataThread):
         except Exception as ex:
             _logger.error(f"Error archiving data from activte database: {ex}")
             raise
-
 
     def upload_data(self):
         """
@@ -1739,7 +1839,6 @@ class DataMinderThread(DataThread):
         except Exception as ex:
             _logger.error(f"Error syncing legacy csv files: {ex}")
 
-
     @task_description("Sync csv files")
     def run_sync_csv_files(self, reschedule=True):
         """
@@ -1753,7 +1852,7 @@ class DataMinderThread(DataThread):
 
         if reschedule:
             # re-schedule next sync at 15 sec after 30 minute interval
-            delay_seconds = next_interval(time.time(), interval=30*60, offset=15)
+            delay_seconds = next_interval(time.time(), interval=30 * 60, offset=15)
 
             self._scheduler.enter(
                 delay=delay_seconds,
@@ -1766,12 +1865,13 @@ class DataMinderThread(DataThread):
         with self._heartbeat_time_lock:
             self._tolerate_hang = False
 
-
     @task_description("Backup active database and sync csv files")
-    def run_database_tasks(self, backup_time_of_day: datetime.time=None, reschedule=True):
+    def run_database_tasks(
+        self, backup_time_of_day: datetime.time = None, reschedule=True
+    ):
         if backup_time_of_day is None:
             # default, one minute past midnight
-            backup_time_of_day = datetime.time(0,1)
+            backup_time_of_day = datetime.time(0, 1)
 
         # there may be a long delay (e.g. network drives), so allow
         # this routine to hang without bringing down the entire program
@@ -1792,9 +1892,9 @@ class DataMinderThread(DataThread):
 
         if reschedule:
             # re-schedule next backup
-            next_backup = datetime.datetime.combine(t.date(), backup_time_of_day).replace(
-                tzinfo=datetime.timezone.utc
-            )
+            next_backup = datetime.datetime.combine(
+                t.date(), backup_time_of_day
+            ).replace(tzinfo=datetime.timezone.utc)
             if (next_backup - t).total_seconds() < 60:
                 next_backup += datetime.timedelta(days=1)
             delay_seconds = (next_backup - t).total_seconds()

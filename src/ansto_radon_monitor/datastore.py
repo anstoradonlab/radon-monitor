@@ -880,15 +880,22 @@ class DataStore(object):
             min_times = []
             for table_name in self.tables:
                 if "Datetime" in self.get_column_names(table_name):
-                    min_times.append(self.get_minimum_time(table_name))
-            # TODO:decide what to do if there are no Datetime columns, depending on how this function is used
-            # currently min([]) --> raises ValueError
-            return min(min_times)
+                    min_time = self.get_minimum_time(table_name)
+                    if min_time is not None:
+                        min_times.append(min_time)
+
+            if len(min_times) == 0:
+                return None
+            else:
+                return min(min_times)
 
         t0 = datetime.datetime.now(datetime.timezone.utc)
         sql = f"select min(Datetime) from {table_name}"
         try:
             tstr = tuple(self.con.execute(sql).fetchall()[0])[0]
+            if tstr is None:
+                # empty table
+                return None
             try:
                 min_time = datetime.datetime.strptime(
                     tstr, "%Y-%m-%d %H:%M:%S"
@@ -991,6 +998,11 @@ class DataStore(object):
                 if ex.args == ("no such column: Datetime",):
                     _logger.warning(f"Datetime column not found in table {view_name}")
                     return None, []
+                # this can happen when there's no data in the table (e.g. maybe it's been miagrated into
+                # backups but the calibration unit has failed so isn't producing more data)
+                # sqlite3.OperationalError: no such column: None
+                if ex.args == ("no such column: None",):
+                    return None, []
                 else:
                     raise ex
         except sqlite3.OperationalError as ex:
@@ -1001,6 +1013,7 @@ class DataStore(object):
                 )
                 return None, []
             else:
+                _logger.error(f"sqlite3.OperationalError \"{ex}\" while executing sql: {sql}")
                 raise ex
         except sqlite3.ProgrammingError as ex:
             # sqlite3.ProgrammingError: Cannot operate on a closed database.
@@ -1067,12 +1080,11 @@ class DataStore(object):
             bg_cps = bgdict[detector_name]
 
             try:
-                # allow for None inputs column
-                if row['LLD_Tot'] is None or bg_cps is None or cal is None:
-                    ApproxRadon = math.nan
-                else:
-                    cps = row['LLD_Tot'] / dt
-                    ApproxRadon = (cps - bg_cps) / cal
+                cps = row['LLD_Tot'] / dt
+                ApproxRadon = (cps - bg_cps) / cal
+            except TypeError as ex:
+                # likely we have an input of None, don't report this
+                ApproxRadon = math.nan
             except Exception as ex:
                 ApproxRadon = math.nan
                 if report_conversion_error:
@@ -1466,6 +1478,9 @@ class DataStore(object):
                     try:
                         cps = row['LLD_Tot'] / 30.0 / 60.0
                         ApproxRadon = (cps - bg_cps) / cal
+                    except TypeError:
+                        # this happens if one of the input parameters is None
+                        ApproxRadon = math.nan
                     except Exception as ex:
                         ApproxRadon = math.nan
                         if report_conversion_error:

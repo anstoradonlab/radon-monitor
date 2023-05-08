@@ -271,7 +271,7 @@ class MainController(object):
         # radon detector(s)
         for ii, detector_config in enumerate(self._configuration.detectors):
             _logger.info(
-                f"Setting up thread for detector {ii} (type of detector: {detector_config.kind})"
+                f"Setting up thread for detector {ii+1} (type of detector: {detector_config.kind})"
             )
             if detector_config.kind == "mock":
                 t = MockDataLoggerThread(
