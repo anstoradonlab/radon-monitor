@@ -36,6 +36,7 @@ def int_to_bool_list(bitfield, numbits, dtype=bool):
     """
     Convert an integer-based bitfield into a list of boolean flags
     """
+    bitfield = int(bitfield)
     a = [False for ii in range(numbits)]
     for ii in range(numbits):
         a[ii] = dtype(bitfield >> ii & 1)
@@ -240,19 +241,40 @@ class LabjackWrapper:
         d = self.device
         success = True
         try:
-            a_in = d.aiSample(channels=[0, 1], numChannels=2)
-            # a_in is now something like: {'idnum': -1,
-            #    'stateIO': 0,
-            #    'overVoltage': 999,  # 0 - not over voltage, >0 - over voltage
-            #    'voltages': [2.5, 1.9677734375]}
-            if a_in["overVoltage"] > 0:
-                _logger.error(f"One of the Labjack analog channels is over voltage")
+            if os.name == "nt":
+                # eAnalogIn does not work on windows OS
+                a_in = d.aiSample(channels=[0, 1], numChannels=2)
+                # a_in is now something like: {'idnum': -1,
+                #    'stateIO': 0,
+                #    'overVoltage': 999,  # 0 - not over voltage, >0 - over voltage
+                #    'voltages': [2.5, 1.9677734375]}
+                if a_in["overVoltage"] > 0:
+                    _logger.error(f"One of the Labjack analog channels is over voltage")
+                voltages = a_in["voltages"]
+
+            else:
+                # aiSample is only available on windows OS
+                # (rawAISample is an option too, but eAnalogIn seems
+                # to do what we need for now)
+                voltages = []
+                for ii in range(2):
+                    try:
+                        a_in = d.eAnalogIn(ii)
+                    except Exception as ex:
+                        _logger.error(f"Error reading from labjack analogue channel {ii}: {ex}")
+                        voltages.append(None)
+                        continue
+
+                    if a_in["overVoltage"]:
+                        _logger.error(f"Labjack analogue channel {ii} is over voltage")
+                    voltages.append(a_in["voltage"])
+
             # remember - special value of -1 means 'talk to any labjack'
             if d.id != -1 and a_in["idnum"] != d.id:
                 _logger.error(
                     f"Labjack reports IDNUM={a_in['idnum']} but we expected {d.id}"
                 )
-            voltages = a_in["voltages"]
+            
         except Exception as ex:
             _logger.error(f"Error reading from labjack analogue channels: {ex}")
             voltages = [None, None]
