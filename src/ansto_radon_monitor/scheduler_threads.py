@@ -1835,7 +1835,7 @@ class DataMinderThread(DataThread):
                 try:
                     self._datastore.sync_legacy_files(data_dir)
                 except Exception as ex:
-                    _logger.error(f"Unable to sync legacy files because of error {ex}")
+                    _logger.error(f"Unable to sync legacy files because of error {ex}.  {traceback.format_exc()}")
         except Exception as ex:
             _logger.error(f"Error syncing legacy csv files: {ex}")
 
@@ -1848,7 +1848,7 @@ class DataMinderThread(DataThread):
         # this routine to hang without bringing down the entire program
         with self._heartbeat_time_lock:
             self._tolerate_hang = True
-        self.sync_legacy_files(data_dir=self._config.data_dir)
+        self.sync_legacy_files(data_dir=self._config.data_dir, include_archives=True)
 
         if reschedule:
             # re-schedule next sync at 15 sec after 30 minute interval

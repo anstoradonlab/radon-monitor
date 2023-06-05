@@ -477,14 +477,10 @@ class DataStore(object):
             _logger.info(f"thread {tid} connecting to database {self.data_file}")
             # ensure directory exists
             db_directory = os.path.dirname(self.data_file)
-            if not os.path.exists(db_directory):
+            if not os.path.exists(db_directory) and not self._readonly:
                 os.makedirs(db_directory)
-            con = sqlite3.connect(
-                self.data_file,
-                detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES,
-                timeout=timeout_seconds,
-            )
-            con.row_factory = sqlite3.Row
+            con = self.connect_to_file(self.data_file, timeout_seconds, self._readonly)
+            
             self._connection_per_thread[tid] = con
 
             if not self._readonly:
@@ -511,6 +507,38 @@ class DataStore(object):
                 )
 
         return self._connection_per_thread[tid]
+
+    def connect_to_file(self, fname, timeout_seconds=5, readonly=False):
+        """Return a connection from a filename
+
+        Parameters
+        ----------
+        fname : str or Pathlib.path
+            Name of file to connect to
+        
+        timeout_seconds : float
+            Timeout, in seconds
+        
+        readonly : Boolean
+            Open as read-only if True
+        """
+        if not readonly:
+            con = sqlite3.connect(
+                fname,
+                detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES,
+                timeout=timeout_seconds,
+            )
+        else:
+            readonly_fname = f"file:{fname}?mode=ro"
+            con = sqlite3.connect(
+                readonly_fname,
+                detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES,
+                timeout=timeout_seconds,
+                uri=True,
+            )
+        con.row_factory = sqlite3.Row
+        return con
+
 
     def create_table(self, table_name, data):
         cur = self.con.cursor()
@@ -870,12 +898,34 @@ class DataStore(object):
         )
         return most_recent_time
 
-    def get_minimum_time(self, table_name):
-        """
-        Return the earliest time in the table
+    def get_minimum_time(self, table_name, con=None):
+        """Return the earliest time in the table
 
-         - slow (scan across all records)
-        """
+        This is quite slow because sqlite needs to scan across 
+        all records
+
+        Parameters
+        ----------
+        table_name : str
+            Table to query.  May be None provided that con is not None.
+        con : sqlite.Connection, optional
+            If provided, run the query on this connection
+            instead of the current active database, by default None
+
+        Returns
+        -------
+        datetime.datetime or None
+            Earliest timestamp present in the table, as a timezone-aware
+            object (UTC)
+
+        Raises
+        ------
+        Can raise errors from sqlite
+        """  
+        if table_name is None:
+            assert con is None
+        if con is None:
+            con = self.con     
         if table_name is None:
             min_times = []
             for table_name in self.tables:
@@ -892,7 +942,7 @@ class DataStore(object):
         t0 = datetime.datetime.now(datetime.timezone.utc)
         sql = f"select min(Datetime) from {table_name}"
         try:
-            tstr = tuple(self.con.execute(sql).fetchall()[0])[0]
+            tstr = tuple(con.execute(sql).fetchall()[0])[0]
             if tstr is None:
                 # empty table
                 return None
@@ -1101,6 +1151,11 @@ class DataStore(object):
             os.path.join(data_dir, "archive", f"{y}-{m:02}-radon.db")
         )
         return fname
+
+    def ls_archives(self, data_dir):
+        """Return a sorted list of database archive files"""
+        fnames = [str(itm) for itm in sorted(pathlib.Path(data_dir, "archive").glob("????-??-radon.db"))]
+        return fnames
 
     def get_archive_db(self, data_dir, y, m, con):
         """
@@ -1383,7 +1438,7 @@ class DataStore(object):
                 con.backup(bck, pages=1024 * 10, progress=progress, sleep=0.25)
             bck.close()
 
-    def sync_legacy_files(self, data_dir):
+    def sync_legacy_files(self, data_dir, include_archives=True):
         """
         Write csv file in the old file format
 
@@ -1400,14 +1455,34 @@ class DataStore(object):
         tz_offset = datetime.timedelta(
             seconds=int(self._config.legacy_file_timezone * 3600)
         )
+
+        # Because of timezone conversion (db is in UTC, but csv output *may* be in some other time zone)
+        # we (always) need to also check for data in the most recent archive file, and we may need to 
+        # sync *all* the archives if we've been asked to do a "deep" sync
+        archive_fnames = self.ls_archives(data_dir)
+        if not include_archives:
+            # just do the most recent file
+            archive_fnames = archive_fnames[-1:]
+        archives = [self.connect_to_file(fn, readonly=True) for fn in archive_fnames]
+        tmin_archives = None
+        for fn,c in zip(archive_fnames, archives):
+            db_mintime = self.get_minimum_time(table_name, c)
+            if tmin_archives is None:
+                tmin_archives = db_mintime
+            elif db_mintime is not None and db_mintime < tmin_archives:
+                tmin_archives = db_mintime
+                    
         # these are the maximum and minimum times in the database, converted into 
         # local time (defined as the timezone for the legacy csv output files)
         tmin_utc = self.get_minimum_time(table_name)
+        if include_archives and tmin_archives is not None:
+            tmin_utc = min([tmin_utc, tmin_archives])
+
         # if this is None the table is empty and there's nothing more to do
         if tmin_utc is None:
             _logger.info(f"Not writing legacy files because database table {table_name} contains no data.")
             return
-        tmin_local = self.get_minimum_time(table_name) + tz_offset
+        tmin_local = tmin_utc + tz_offset
         tmax_local = self.get_update_time(table_name, None) + tz_offset
 
         # define month names statically to prevent any interction with user's
@@ -1514,9 +1589,19 @@ class DataStore(object):
                     f"SELECT {','.join(colnames_quoted)} from Results LEFT OUTER JOIN detector_names ON Results.DetectorName=detector_names.id "
                     f'WHERE Datetime >= "{t0_query.strftime(DBTFMT)}" and Datetime < "{t1_query.strftime(DBTFMT)}" and name = "{detector_name}"'
                 )
-
+                data = []
+                fn = ""
                 try:
-                    data = self.con.execute(sql).fetchall()
+                    for current_fn,archive_con in zip(archive_fnames, archives):
+                        fn = current_fn
+                        data_archive = archive_con.execute(sql).fetchall()
+                        data.extend(data_archive)
+                except Exception as ex:
+                    _logger.error(f"Error ({ex}) while executing sql: {sql} on Archive database {fn}."
+                                  "  Continuing, but csv output may be incomplete.")
+                try:
+                    data_current = self.con.execute(sql).fetchall()
+                    data.extend(data_current)
                 except sqlite3.OperationalError as ex:
                     if ex.args == ("no such column: Results.DetectorName",):
                         # this may happen on a new database, where the results column has been created

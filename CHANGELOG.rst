@@ -8,7 +8,9 @@ Version 10.7
 Not yet released
 
 - Interpret LabJack errors in the logfile, e.g. "2" becomes "No LabJacks found."
-
+- Re-sync all of the legacy-format csv files on startup or when a sync is requested from the File menu.  This also means that users can re-generate legacy csv output by deleting the csv files and then selecting File->Sync output files.
+- Fix an issue where data could be missing from the csv files at the end of the month if csv file output is set to a time zone other than UTC
+- Fix an issue with the Calibration dialog box where the time between calibration and background events was not being saved to disk
 
 Version 10.6
 ============
