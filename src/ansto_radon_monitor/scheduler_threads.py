@@ -1208,8 +1208,7 @@ class DataLoggerThread(DataThread):
                     return
 
                 # connect can take a long time, but this is Ok
-                # TODO: maybe set this flag:
-                # self._tolerate_hang = True
+                self._tolerate_hang = True
                 self.update_heartbeat_time()
                 # TODO: handle 'unable to connect' error
                 self.tables = [
@@ -1248,6 +1247,8 @@ class DataLoggerThread(DataThread):
                 f"Error finalising connection to datalogger: {ex} {traceback.format_exc()}"
             )
             self.reconnect_func()
+        finally:
+            self._tolerate_hang = False
 
     def measurement_func(self):
         # if there is not yet a connection, then do nothing
