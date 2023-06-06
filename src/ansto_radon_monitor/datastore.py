@@ -17,40 +17,16 @@ from logging.handlers import RotatingFileHandler
 from sqlite3.dbapi2 import OperationalError
 from typing import Union, Dict, Any
 
+from .flag_calc import FlagCalculator
+from .data_util import *
+
 _logger = logging.getLogger(__name__)
 
 
-# database time format
-DBTFMT = "%Y-%m-%d %H:%M:%S"
 
 # create views in database (searches for recent data)
 CREATE_VIEWS = False
 
-def format_date(t):
-    """
-    Format the timestamp so that the timezone gets dropped
-    (All dates are assumed to be set to UTC)
-    """
-    # Enforce the use of timezone-aware datetimes
-    if not t.tzinfo == datetime.timezone.utc:
-        print("t.tzinfo is not UTC")
-    return t.strftime(DBTFMT)
-
-
-def parse_date(tstr):
-    return datetime.datetime.strptime(tstr, DBTFMT).replace(
-        tzinfo=datetime.timezone.utc
-    )
-
-def enquote(itm):
-    """
-    Add double quotes to a string so that it can be used as an SQL table or column name
-
-    # TODO: decide how to handle SQL quoting/safety in general.  At present, all 
-    # dynamic names come from the datalogger or the database, so it should not be
-    # possible for them to be badly formed.
-    """
-    return '"' + itm + '"'
 
 # by default, a timezone-aware timestamp passed to the database will be written in
 # a format which can't easily be round-tripped
@@ -1471,7 +1447,10 @@ class DataStore(object):
                 tmin_archives = db_mintime
             elif db_mintime is not None and db_mintime < tmin_archives:
                 tmin_archives = db_mintime
-                    
+
+        # Helper class to keep track of cal/bg/maintenance etc
+        flag_calc = FlagCalculator(archives + [self.con])
+
         # these are the maximum and minimum times in the database, converted into 
         # local time (defined as the timezone for the legacy csv output files)
         tmin_utc = self.get_minimum_time(table_name)
@@ -1518,6 +1497,7 @@ class DataStore(object):
                 2020, 306,11,01,00:00, 45.42, 681, 8.12, 578.9, 2126, 1400, 0, 18.17, 34.56, 23.87, 63.83, 1009.168, 13.73,, 0
 
             """
+            row = dict(row)
             nonlocal report_conversion_error
             output = []
             if headers:
@@ -1536,7 +1516,9 @@ class DataStore(object):
                 # two spaces after 'Time' in the headers
                 output_str.replace("Time, ", "Time,  ")
             else:
-                for k, itm in zip(row.keys(), row):
+                for k, itm in row.items():
+                    # this assert is here because it's easy to pass in a sqlite row which behaves
+                    # slightly differently to a Dict
                     assert itm == row[k]
                     if k == "Datetime":
                         itm = datetime.datetime.strptime(itm, DBTFMT).replace(
@@ -1656,6 +1638,21 @@ class DataStore(object):
                         csv_needs_update = False
 
                 if csv_needs_update:
+                    # make data mutable
+                    data = [dict(row) for row in data]
+                    # add "Comments" and "Flag" columns
+                    for row in data:
+                        if not "Comments" in row:
+                            row["Comments"] = ""
+                        if not "Flag" in row:
+                            try:
+                                t = parse_date(row["Datetime"])
+                                row["Flag"] = flag_calc.flag(t, detector_name)
+                            except:
+                                row["Flag"] = None
+                                print(row)
+                                raise
+
                     _logger.info(f"Updating csv file {fname}")
                     # create a directory if necessary
                     dirname = os.path.abspath(os.path.dirname(fname))
