@@ -1489,6 +1489,39 @@ class DataStore(object):
         ]
         colnames_quoted = [f'"{itm}"' for itm in colnames]
 
+        def rename_and_sort(row: Dict):
+            """Rename columns to match the format of the old RDM
+
+            Args:
+                row (dict): one row of output data
+            """
+            row = dict(row)
+            if not "Spare" in row:
+                row["Spare"] = None
+            
+            output_list = []
+            new_names = {"Gas_meter": "GM",
+                         "PanTemp":"Temp",
+                         "Pres":"Press",
+                         "BatV": "Batt"}
+            for k,v in row.items():
+                # strip the "_Tot" etc. suffix
+                if k.endswith("_Tot") or k.endswith("_Avg"):
+                    k = k[:-4]
+                
+                k = new_names.get(k, k)
+                output_list.append( (k,v) )
+            
+            sort_order = {
+            "Datetime":0,  
+              "ExFlow":1, "GM":2, "InFlow":3, "HV":4, "Spare":5,"LLD":6, "ULD":7, "TankP":8,
+              "Temp":9, "AirT":10, "RelHum":11, "Press":12,  "Batt":13, "Comments":14, "Flag":15}
+            
+            output_list.sort(key=lambda x: sort_order.get(x[0], 1000))
+            output = dict(output_list)
+
+            return output
+
         def format_rec(row, headers=False, tz_offset=datetime.timedelta(seconds=0), with_radon=True, cal=.2, bg_cps=1/60.0):
             """format a row, if headers is True then format for headers
 
@@ -1497,7 +1530,7 @@ class DataStore(object):
                 2020, 306,11,01,00:00, 45.42, 681, 8.12, 578.9, 2126, 1400, 0, 18.17, 34.56, 23.87, 63.83, 1009.168, 13.73,, 0
 
             """
-            row = dict(row)
+            row = rename_and_sort(row)
             nonlocal report_conversion_error
             output = []
             if headers:
@@ -1506,9 +1539,6 @@ class DataStore(object):
                         # special case - this gets expanded
                         output.extend(("Year", "DOY", "Month", "DOM", "Time"))
                     else:
-                        # strip the "_Tot" etc. suffix
-                        if itm.endswith("_Tot") or itm.endswith("_Avg"):
-                            itm = itm[:-4]
                         output.append(itm)
                 if with_radon:
                     output.append("ApproxRadon")
@@ -1533,7 +1563,7 @@ class DataStore(object):
                         output.append("")
                 if with_radon:
                     try:
-                        cps = row['LLD_Tot'] / 30.0 / 60.0
+                        cps = row['LLD'] / 30.0 / 60.0
                         ApproxRadon = (cps - bg_cps) / cal
                     except TypeError:
                         # this happens if one of the input parameters is None
@@ -1660,11 +1690,12 @@ class DataStore(object):
                         _logger.info(f"Creating directory {dirname}")
                         os.makedirs(dirname)
 
+                    with_radon = self._config.legacy_file_write_approx_radon
                     with open(fname, "wt") as fd:
-                        fd.write(format_rec(data[0], headers=True, with_radon=True))
+                        fd.write(format_rec(data[0], headers=True, with_radon=with_radon))
                         fd.write("\n")
                         for row in data:
-                            fd.write(format_rec(row, headers=False, tz_offset=tz_offset, cal=cal, bg_cps=bg_cps, with_radon=True))
+                            fd.write(format_rec(row, headers=False, tz_offset=tz_offset, cal=cal, bg_cps=bg_cps, with_radon=with_radon))
                             fd.write("\n")
 
     def shutdown(self):

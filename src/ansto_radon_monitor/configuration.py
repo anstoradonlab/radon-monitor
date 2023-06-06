@@ -119,6 +119,7 @@ class Configuration:
     data_dir: pathlib.Path = pathlib.Path(".", "data").absolute()
     data_file: typing.Optional[pathlib.Path] = None
     legacy_file_timezone: float = 0
+    legacy_file_write_approx_radon: bool = True
     backup_time_of_day: datetime.time = datetime.time(0,10)
     detectors: typing.List[DetectorConfig] = field(default_factory=list)
     calbox: CalUnitConfig = CalUnitConfig()

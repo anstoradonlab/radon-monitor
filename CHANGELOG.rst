@@ -8,9 +8,21 @@ Version 10.7
 Not yet released
 
 - Interpret LabJack errors in the logfile, e.g. "2" becomes "No LabJacks found."
-- Re-sync all of the legacy-format csv files on startup or when a sync is requested from the File menu.  This also means that users can re-generate legacy csv output by deleting the csv files and then selecting File->Sync output files.
-- Fix an issue where data could be missing from the csv files at the end of the month if csv file output is set to a time zone other than UTC
-- Fix an issue with the Calibration dialog box where the time between calibration and background events was not being saved to disk
+- Re-sync all of the legacy-format csv files on startup or when a sync is requested
+  from the File menu.  This also means that users can re-generate legacy csv output
+  by deleting the csv files and then selecting File->Sync output files.
+- Fix the legacy-format csv files so that they have the same column names as the 
+  previous version of RDM. There is a new configuration option making it possible to
+  disable the ApproxRadon column, since this column was not present in the old format::
+
+    [data]
+    legacy_file_write_approx_radon=True
+
+
+- Fix an issue where data could be missing from the csv files at the end of the month 
+  if csv file output is set to a time zone other than UTC
+- Fix an issue with the Calibration dialog box where the time between calibration and
+  background events was not being saved to disk
 
 Version 10.6
 ============
