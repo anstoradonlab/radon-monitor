@@ -322,7 +322,10 @@ class MainController(object):
                 wait_list.append(itm)
         for itm in wait_list:
             _logger.info(f"Waiting for {itm.name}")
-            itm.join(timeout=30)
+            if itm.is_alive():
+                itm.join(timeout=30)
+            else:
+                _logger.error(f'Thread {itm.name} is not alive')
             if itm.is_alive():
                 _logger.error(f'Thread {itm.name} is still running after waiting for 30s')
                 msg = "".join(
@@ -342,7 +345,10 @@ class MainController(object):
                     # it's possible to call shutdown from MonitorThread, so don't wait 
                     # on the current thread
                     _logger.info(f"Waiting for {itm.name}")
-                    itm.join()
+                    if itm.is_alive():
+                        itm.join(timeout=30)
+                    else:
+                        _logger.error(f'Thread {itm.name} is not alive')
 
         _logger.info("All threads have finished shutting down.")
         # check for active threads which should not be present
@@ -456,7 +462,7 @@ class MainController(object):
         """
         jobq = []
         for t in self._threads:
-            # only report on the calibration unit & 
+            # only report on the calibration unit & data minder
             if t.name == "CalibrationUnitThread" or t.name == "DataMinderThread":
                 jobq = t.task_queue
 
@@ -471,9 +477,10 @@ class MainController(object):
 
     def backup_now(self):
         """
-        Run the backup/csv output/file upload tasks
+        Run the backup/csv output/file upload tasks (syncing csv
+        output from the archive files as well as the active database)
         """
-        self._data_minder_task.schedule_database_tasks()
+        self._data_minder_task.schedule_database_tasks(include_archives=True)
 
 
     def run_calibration(

@@ -1742,7 +1742,7 @@ class DataMinderThread(DataThread):
         self._backup_lock = threading.RLock()
         self._csv_output_lock = threading.RLock()
 
-        self.run_sync_csv_files(reschedule=True)
+        self.run_sync_csv_files(reschedule=True, include_archives=True)
 
         # perform some tasks a short time after startup
         backup_time_of_day = config.backup_time_of_day
@@ -1765,13 +1765,14 @@ class DataMinderThread(DataThread):
         # ensure that the scheduler function is run immediately on startup
         self.state_changed.set()
 
-    def schedule_database_tasks(self, delay_seconds=0):
+    def schedule_database_tasks(self, delay_seconds=0, include_archives=False):
         # run the database tasks once, via the scheduler
         self._scheduler.enter(
             delay=delay_seconds,
             priority=0,
             action=self.run_database_tasks,
-            kwargs={"backup_time_of_day": None, "reschedule": False},
+            kwargs={"backup_time_of_day": None, "reschedule": False, 
+                    "include_archives":include_archives},
         )
 
     def backup_active_database(self, backup_filename=None):
@@ -1828,19 +1829,19 @@ class DataMinderThread(DataThread):
                     dirname_remote=directory,
                 )
 
-    def sync_legacy_files(self, data_dir):
+    def sync_legacy_files(self, data_dir, include_archives=False):
         try:
             with self._csv_output_lock:
                 _logger.debug("Writing data to legacy file format")
                 try:
-                    self._datastore.sync_legacy_files(data_dir)
+                    self._datastore.sync_legacy_files(data_dir, include_archives=include_archives)
                 except Exception as ex:
                     _logger.error(f"Unable to sync legacy files because of error {ex}.  {traceback.format_exc()}")
         except Exception as ex:
             _logger.error(f"Error syncing legacy csv files: {ex}")
 
     @task_description("Sync csv files")
-    def run_sync_csv_files(self, reschedule=True):
+    def run_sync_csv_files(self, reschedule=True, include_archives=False):
         """
         Sync the csv files and re-schedule
         """
@@ -1848,12 +1849,12 @@ class DataMinderThread(DataThread):
         # this routine to hang without bringing down the entire program
         with self._heartbeat_time_lock:
             self._tolerate_hang = True
-        self.sync_legacy_files(data_dir=self._config.data_dir, include_archives=True)
+        self.sync_legacy_files(data_dir=self._config.data_dir, include_archives=include_archives)
 
         if reschedule:
             # re-schedule next sync at 15 sec after 30 minute interval
             delay_seconds = next_interval(time.time(), interval=30 * 60, offset=15)
-
+            # when rescheduling, don't "include_archives"
             self._scheduler.enter(
                 delay=delay_seconds,
                 priority=0,
@@ -1867,7 +1868,7 @@ class DataMinderThread(DataThread):
 
     @task_description("Backup active database and sync csv files")
     def run_database_tasks(
-        self, backup_time_of_day: datetime.time = None, reschedule=True
+        self, backup_time_of_day: datetime.time = None, reschedule=True, include_archives=False,
     ):
         if backup_time_of_day is None:
             # default, one minute past midnight
@@ -1883,7 +1884,7 @@ class DataMinderThread(DataThread):
         time.sleep(1)
         t0 = datetime.datetime.now(datetime.timezone.utc)
         # run tasks
-        self.sync_legacy_files(data_dir=self._config.data_dir)
+        self.sync_legacy_files(data_dir=self._config.data_dir, include_archives=include_archives)
         self.archive_data(data_dir=self._config.data_dir)
         self.backup_active_database()
         t = datetime.datetime.now(datetime.timezone.utc)
