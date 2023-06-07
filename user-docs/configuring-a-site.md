@@ -99,7 +99,9 @@ logfile=c:\data\radon_monitor_messages.log
 # "CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"
 #loglevel="DEBUG"
 loglevel= INFO
-
+# If True, this option adds an "ApproxRadon" to the legacy format
+# csv output (optional, True by default)
+# legacy_file_write_approx_radon=True
 
 # detector_kind sets the type of radon detector.  Options are:
 #  "L1500" - standard 1500 litre detector
@@ -127,6 +129,7 @@ datalogger_serial=-1
 
 [calbox]
 # there are different kinds of calibration units.  These are
+# - `none`: no calibration unit attached, e.g. for manual calibrations
 # - `generic`: single detector, built around a Labjack connected over USB
 # - `CapeGrim`: two detectors, built around a Labjack connected over USB
 # - `BurkertModel1`: one or two detectors, a new system available from Jan 2023.
@@ -155,9 +158,11 @@ background_duration_sec=3600
 # ip address of the Burkert ME43 gateway (only applies when kind=BurkertModel1)
 me43_ip_address=192.168.0.100
 # flow rate setpoint on the calibration unit's mass flow controller during source flushing (units of standard l/min)
-flush_flow_rate=0.5 (only applies when kind=BurkertModel1)
+# (only applies when kind=BurkertModel1, optional, default=0.5)
+flush_flow_rate=0.5 
 # flow rate setpoint on the calibration unit's mass flow controller during injection (units of standard l/min)
-inject_flow_rate=0.5 (only applies when kind=BurkertModel1)
+# (only applies when kind=BurkertModel1, optional, default=0.5)
+inject_flow_rate=0.5 
 
 
 

@@ -5,7 +5,13 @@ Changelog
 
 Version 10.7
 ============
-Not yet released
+8 June 2023
+
+**This release includes a change to the 'legacy' csv file format.  This format
+was intended to be a drop-in replacement for the output from the previous version
+of RDM, but some of the details did not match.  After installing this upgrade,
+if the legacy output is enabled, users should delete the current .csv files.  The
+csv files will be regenerated after RDM starts up** 
 
 - Interpret LabJack errors in the logfile, e.g. "2" becomes "No LabJacks found."
 - Re-sync all of the legacy-format csv files on startup or when a sync is requested
