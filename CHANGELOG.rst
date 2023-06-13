@@ -2,6 +2,11 @@
 Changelog
 =========
 
+Version 10.7.1
+==============
+13 June 2023
+
+Bugfix release: fix an error introduced in v10.7 where the flag calculation can fail.
 
 Version 10.7
 ============

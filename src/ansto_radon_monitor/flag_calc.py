@@ -69,7 +69,7 @@ def load_times_list(con_list, sql, is_t0_func, is_t1_func,
             t0 = None
             detector = None
     if t0 is not None:
-        t1 = datetime.datetime.now(tz=datetime.timezone.utc) + datetime.timedelta(year=100)
+        t1 = datetime.datetime.now(tz=datetime.timezone.utc) + datetime.timedelta(days=1000)
         times_list.append( (t0, t1, detector) )
  
     return times_list
