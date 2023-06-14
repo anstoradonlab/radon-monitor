@@ -414,6 +414,19 @@ def column_definition(column_name):
     return f'"{column_name}" {dtype}'.strip()
 
 
+# TODO:
+# Remove unused columns in the database, at least for the RTV and 
+# Results tables.  This is needed because the data in these two
+# tables is defined by whatever the datalogger decides to produce. 
+# From time to time, things can be added or removed from the 
+# datalogger fields.
+# Helpful sql code:
+# - get a list of the columns in a table
+#    PRAGMA table_info(Results);
+# - get the total number of rows in the table and
+#   the number of valid entries in the ULD_Tot column
+#    select count(*) as nrows, count(ULD_Tot) as nvalid from Results;
+
 class DataStore(object):
     """
     Data store backed by a sqlite database
@@ -1489,6 +1502,33 @@ class DataStore(object):
         ]
         colnames_quoted = [f'"{itm}"' for itm in colnames]
 
+        def filter_empty_columns(data: typing.List[typing.Dict]):
+            """Return a copy of data with empty columns removed, unless they are
+            in the list of 'required' columns
+
+            Assumes that "rename_and_sort" has already been called
+
+            Args:
+                data List of dict: list of data items
+            """
+            required_columns = set(['Datetime', 'ExFlow', 'GM', 'InFlow', 'HV', 'Spare',
+                                'LLD', 'ULD', 'TankP', 'Temp', 'AirT', 'RelHum', 'Press', 'Batt', 'Comments',
+                                'Flag'])
+            for d in data:
+                for k,v in d.items():
+                    if v is not None:
+                        required_columns.add(k)
+            
+            data_out = []
+            for d in data:
+                d_out = {}
+                for k,v in d.items():
+                    if k in required_columns:
+                        d_out[k] = v
+                data_out.append(d_out)
+            
+            return data_out
+
         def rename_and_sort(row: Dict):
             """Rename columns to match the format of the old RDM
 
@@ -1683,6 +1723,8 @@ class DataStore(object):
                                 print(row)
                                 raise
 
+                    data = [rename_and_sort(row) for row in data]
+                    data = filter_empty_columns(data)
                     _logger.info(f"Updating csv file {fname}")
                     # create a directory if necessary
                     dirname = os.path.abspath(os.path.dirname(fname))
