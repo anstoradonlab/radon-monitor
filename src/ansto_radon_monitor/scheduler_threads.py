@@ -92,7 +92,7 @@ def next_interval(sec, interval, offset=0.0):
     sec : float, as e.g. returned by time.time()
         now
     interval : float
-        interval length (seconds)
+        interval length (seconds), > 0.0
     offset : float, optional
         offset for first interval, e.g. if interval is 10.0 and offset is 1.0,
         the interval will expire at 11.0, 21.0, ... sec
@@ -100,9 +100,17 @@ def next_interval(sec, interval, offset=0.0):
     Returns
     -------
     float
-        time until next interval expires
+        time until next interval expires, guaranteed to be > 0.0 provided that
+        interval > 0.0
     """
-    return (math.ceil((sec - offset) / interval) * interval) - (sec - offset)
+    t =  (math.ceil((sec - offset) / interval) * interval) - (sec - offset)
+    if t == 0:
+        # this is more likely to happen if sec comes from a coarse-resolution
+        # clock, e.g. time.monotonic is ~15 ms resolution on windows
+        # until Python 3.11
+        # https://github.com/python-trio/trio/issues/33
+        t += interval
+    return t
 
 
 class DataThread(threading.Thread):
@@ -220,6 +228,10 @@ class DataThread(threading.Thread):
     # @task_description("Poll the measurement hardware")
     def run_measurement(self):
         """call measurement function and schedule next"""
+        if self.cancelled:
+            # do nothing if we're shutting down (especially, don't
+            # re-schedule the measurement)
+            return
         try:
             self.measurement_func()
 
