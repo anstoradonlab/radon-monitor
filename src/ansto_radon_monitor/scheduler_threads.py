@@ -165,6 +165,23 @@ class DataThread(threading.Thread):
 
         self._scheduler.enter(delay=1, priority=0, action=self.update_heartbeat_time)
 
+        self.debug_print_interval = 3600
+        self.debug_print_offset = 65
+
+        self.debug_print_task_queue()
+
+        delay = next_interval(time.time(), self.debug_print_interval, self.debug_print_offset)
+        self._scheduler.enter(delay=delay, priority=0, action=self.debug_print_task_queue)
+
+
+    def debug_print_task_queue(self):
+        
+        delay = next_interval(time.time(), self.debug_print_interval, self.debug_print_offset)
+        self._scheduler.enter(delay=delay, priority=0, action=self.debug_print_task_queue)
+
+        task_descriptions = '\n --- '.join(["Task queue"] + self.task_queue_all)
+        _logger.info(task_descriptions)
+
     def shutdown(self):
         self.cancelled = True
         self.state_changed.set()
@@ -197,6 +214,13 @@ class DataThread(threading.Thread):
 
     @property
     def task_queue(self):
+        return self._task_queue(all=False)
+    
+    @property
+    def task_queue_all(self):
+        return self._task_queue(all=True)
+    
+    def _task_queue(self, all=False):
         """
         Human-readable version of the task queue
         """
@@ -205,16 +229,20 @@ class DataThread(threading.Thread):
             fmt = "%Y-%m-%d %H:%M:%S"
             return datetime.datetime.fromtimestamp(t).strftime(fmt)
 
-        def task_to_readable(task):
+        def task_to_readable(task, all=False):
             t = time_to_text(task.time)
             try:
                 desc = task.action.description
                 return f"{t} {desc}"
             except AttributeError:
-                return None
+                if all:
+                    desc = str(task.action)
+                    return f"{t} {desc}"
+                else:
+                    return None
 
         with self._lock:
-            ret = [task_to_readable(itm) for itm in self._scheduler.queue]
+            ret = [task_to_readable(itm, all=all) for itm in self._scheduler.queue]
             ret = [itm for itm in ret if not itm is None]
         return ret
 
