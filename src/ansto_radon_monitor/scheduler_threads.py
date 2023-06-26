@@ -175,9 +175,15 @@ class DataThread(threading.Thread):
 
 
     def debug_print_task_queue(self):
-        
-        delay = next_interval(time.time(), self.debug_print_interval, self.debug_print_offset)
-        self._scheduler.enter(delay=delay, priority=0, action=self.debug_print_task_queue)
+        # re-queue unless there is already a "print task queue" job in the queue
+        for task in self._scheduler.queue:
+            if task.action == self.debug_print_task_queue:
+                found_task = True
+                break
+            found_task = False
+        if not found_task:
+            delay = next_interval(time.time(), self.debug_print_interval, self.debug_print_offset)
+            self._scheduler.enter(delay=delay, priority=0, action=self.debug_print_task_queue)
 
         task_descriptions = '\n --- '.join(["Task queue"] + self.task_queue_all)
         _logger.info(task_descriptions)
