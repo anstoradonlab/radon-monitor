@@ -189,7 +189,14 @@ class DataThread(threading.Thread):
     def update_heartbeat_time(self):
         with self._heartbeat_time_lock:
             self._heartbeat_time = time.time()
-        self._scheduler.enter(delay=1, priority=0, action=self.update_heartbeat_time)
+        # re-queue unless there is already an "update heartbeat" job in the queue
+        for task in self._scheduler.queue:
+            if task.action == self.update_heartbeat_time:
+                found_task = True
+                break
+            found_task = False
+        if not found_task:
+            self._scheduler.enter(delay=1, priority=0, action=self.update_heartbeat_time)
 
     @property
     def heartbeat_age(self):
