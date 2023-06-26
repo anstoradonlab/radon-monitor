@@ -168,11 +168,9 @@ class DataThread(threading.Thread):
         self.debug_print_interval = 3600
         self.debug_print_offset = 65
 
-        self.debug_print_task_queue()
-
-        delay = next_interval(time.time(), self.debug_print_interval, self.debug_print_offset)
-        self._scheduler.enter(delay=delay, priority=0, action=self.debug_print_task_queue)
-
+        # TODO: perhaps make this a configuration option
+        if False:
+            self.debug_print_task_queue()
 
     def debug_print_task_queue(self):
         # re-queue unless there is already a "print task queue" job in the queue
