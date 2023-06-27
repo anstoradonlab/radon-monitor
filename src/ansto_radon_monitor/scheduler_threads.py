@@ -221,7 +221,13 @@ class DataThread(threading.Thread):
         _logger.debug(f"Reconnect function - stub")
 
     def shutdown_func(self):
+        """
+        This function is called at the very end of execution, after
+        the task scheduler has finished
+        """
         _logger.debug(f"Shutdown function")
+        # close the per-thread connection to the datastore
+        self._datastore.shutdown()
 
     @property
     def task_queue(self):
@@ -591,6 +597,8 @@ class CalibrationUnitThread(DataThread):
             _ = self.status
 
     def shutdown_func(self):
+        # this closes the connection to the database
+        super().shutdown_func()
         # this should have no effect.  It's here in case of logic errors in shutdown
         # - a non-logging command to reset the device to its default state.
         if self._device is None:
@@ -1197,6 +1205,7 @@ class DataLoggerThread(DataThread):
         _logger.info(report_txt)
 
     def shutdown_func(self):
+        super().shutdown_func()
         # the CR1000 finalizer (__del__) closes the port and
         # sends a goodbye message to the datalogger.  It is
         # an 'implementation detail' of Cython that this will

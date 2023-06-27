@@ -462,7 +462,8 @@ class DataStore(object):
         timeout_seconds = 60 * 5
         #timeout_seconds = 1  # for testing (finds failure points)
         tid = threading.get_ident()
-        if not tid in self._connection_per_thread:
+        con = self._connection_per_thread.get(tid, None)
+        if con is None:
             _logger.info(f"thread {tid} connecting to database {self.data_file}")
             # ensure directory exists
             db_directory = os.path.dirname(self.data_file)
@@ -495,7 +496,35 @@ class DataStore(object):
                     "CREATE TABLE IF NOT EXISTS persistent_state (key,value)"
                 )
 
-        return self._connection_per_thread[tid]
+        return con
+
+    def shutdown(self):
+        """
+        This should be called by each thread before shutdown.  If it is not called the extra files (.wal, .shm)
+        might be left around after the process finishes.  See: https://www.sqlite.org/wal.html
+
+        It's safe to call this multiple times from the same thread.  On the first call, the connection
+        for that thread is closed and a None placeholder is stored in its place.  The next call is a no-op.
+        
+        """
+        #import traceback
+        #tb = ''.join(traceback.format_stack())
+        #_logger.info(f"Shutdown called from:\n {tb}")
+        tid = threading.get_ident()
+        con = self._connection_per_thread.get(tid, None)
+        if con is not None:
+            con.close()
+            self._connection_per_thread[tid] = None
+        
+
+    # Uncomment this to show which threads are not shutting down the datastore   
+    # def __del__(self):
+    #     print("*** Datastore: __del__()")
+    #     print(f"*** {self._connection_per_thread}")
+    #     for k,v in self._connection_per_thread.items():
+    #         if v is not None:
+    #             print(f"*** Thread with id {k} didn't shut down the datastore.")
+
 
     def connect_to_file(self, fname, timeout_seconds=5, readonly=False):
         """Return a connection from a filename
@@ -1740,9 +1769,6 @@ class DataStore(object):
                             fd.write(format_rec(row, headers=False, tz_offset=tz_offset, cal=cal, bg_cps=bg_cps, with_radon=with_radon))
                             fd.write("\n")
 
-    def shutdown(self):
-        """call this before shutdown"""
-        self.con.close()
 
 
 #%%
