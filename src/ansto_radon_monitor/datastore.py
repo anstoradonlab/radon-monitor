@@ -513,6 +513,7 @@ class DataStore(object):
         tid = threading.get_ident()
         con = self._connection_per_thread.get(tid, None)
         if con is not None:
+            _logger.info(f"Thread {tid} closing database connection")
             con.close()
             self._connection_per_thread[tid] = None
         

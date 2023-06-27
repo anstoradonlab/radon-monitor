@@ -312,20 +312,21 @@ class MainController(object):
         """
         Stop all activity in threads
         """
+        this_is_main_thread = threading.main_thread() == threading.current_thread()
         self.datastore.add_log_message("SystemEvent", "Shutdown")
         self._shutting_down = True
         _logger.info("Asking threads to shut down.")
         wait_list = []
+        # Shut down threads other than the MonitorThread first, that way the MonitorThread
+        # will still be around to report on what the other threads are doing if there are
+        # problems during shutdown
         for itm in self._threads:
             if not itm.name == "MonitorThread":
                 itm.shutdown()
                 wait_list.append(itm)
         for itm in wait_list:
             _logger.info(f"Waiting for {itm.name}")
-            if itm.is_alive():
-                itm.join(timeout=30)
-            else:
-                _logger.error(f'Thread {itm.name} is not alive')
+            itm.join(timeout=30)
             if itm.is_alive():
                 _logger.error(f'Thread {itm.name} is still running after waiting for 30s')
                 msg = "".join(
@@ -333,9 +334,10 @@ class MainController(object):
                             )
                 _logger.error(f'Thread {itm.name} stack trace: {msg}')
 
-        _logger.info("Shutting down datastore.")
-        # this, the datastore, is in the main thread.  We're just closing the database.
-        self.datastore.shutdown()
+        # if the MonitorThread has asked us to shutdown, we'll fail to close the mainthread's database
+        # connection, but this is Ok (it will be cleaned up next the the program runs)
+        if this_is_main_thread:
+            self.datastore.shutdown()
 
         # finally, shut down the MonitorThread
         for itm in self._threads:
@@ -345,15 +347,19 @@ class MainController(object):
                     # it's possible to call shutdown from MonitorThread, so don't wait 
                     # on the current thread
                     _logger.info(f"Waiting for {itm.name}")
+                    itm.join(timeout=30)
                     if itm.is_alive():
-                        itm.join(timeout=30)
-                    else:
-                        _logger.error(f'Thread {itm.name} is not alive')
+                        _logger.error(f'Thread {itm.name} is still running after waiting for 30s')
+                        msg = "".join(
+                                        traceback.format_stack(sys._current_frames()[itm.ident])
+                                    )
+                        _logger.error(f'Thread {itm.name} stack trace: {msg}')
 
         _logger.info("All threads have finished shutting down.")
-        # check for active threads which should not be present
+        # check for active threads - only MainThread or the current thread (which is most likely to be
+        # the MainThread, but might also be MonitorThread) should still be running.
         for itm in threading.enumerate():
-            if not (threading.main_thread()).ident == threading.get_ident():
+            if not (itm == threading.main_thread() or itm == threading.current_thread()):
                 _logger.error(f"A thread is still alive after shutdown: {itm}")
         
 
@@ -366,7 +372,7 @@ class MainController(object):
 
     def terminate(self):
         """
-        Terminate the entire process (most useful if running as ICP server)
+        Terminate the entire process (most useful if running as IPC server)
         """
         self.shutdown()
 
@@ -379,7 +385,7 @@ class MainController(object):
             os.kill(os.getpid(), signal.SIGTERM)
             time.sleep(10)
             # should not get here
-            sys.exit(0)
+            sys.exit(1)
 
         t = threading.Thread(target=delayed_exit, daemon=True)
         t.start()
@@ -464,7 +470,7 @@ class MainController(object):
         for t in self._threads:
             # only report on the calibration unit & data minder
             if t.name == "CalibrationUnitThread" or t.name == "DataMinderThread":
-                jobq = t.task_queue
+                jobq.append(t.task_queue)
 
         return jobq
 
