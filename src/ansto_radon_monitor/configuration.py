@@ -122,8 +122,8 @@ class Configuration:
     legacy_file_write_approx_radon: bool = True
     backup_time_of_day: datetime.time = datetime.time(0,10)
     detectors: typing.List[DetectorConfig] = field(default_factory=list)
-    calbox: CalUnitConfig = CalUnitConfig()
-    ftp: FtpConfig = FtpConfig()
+    calbox: CalUnitConfig = field(default_factory=CalUnitConfig)
+    ftp: FtpConfig = field(default_factory=FtpConfig)
 
     def as_text(self):
         return pprint.pformat(self)
