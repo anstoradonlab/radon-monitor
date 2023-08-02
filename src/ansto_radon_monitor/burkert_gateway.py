@@ -5,7 +5,7 @@ from pymodbus.exceptions import ConnectionException
 import time
 import logging
 import traceback
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 
 from .calbox_device import CalboxDevice
@@ -269,9 +269,18 @@ class BurkertGateway(CalboxDevice):
         # as a secondary fail-safe, and regardless of what else happens, 
         # never put in more than this much air to limit the overpressure
         # to a relatively small value
-
         target_source_pressure_pa = 10_000.0
-        max_volume_l = 0.1
+
+        # if the source capsule is already pressurised, there's nothing to do
+        data = self._read_values()
+        p_meas = data["SourcePressure"]
+        if p_meas >= target_source_pressure_pa:
+            return
+
+        # source volume is about 230 ml, 10kPa overpressure is about a tenth
+        # of atmosphere, so we want to add about 23 ml to reach 10kPa.  Allow
+        # for roughly double that (50 ml) as our maximum overpressure.
+        max_volume_l = 0.05
         max_time_sec = (max_volume_l / self.MFC_DEFAULT_FLOW) * 60
         t0 = time.time()
         # start pressurising
@@ -285,6 +294,7 @@ class BurkertGateway(CalboxDevice):
 
         pressure_set_success = False
         p_meas = None
+        _logger.info(f"Pressurising source capsule to {target_source_pressure_pa} kPa.")
         while (time.time() - t0) < max_time_sec:
             data = self._read_values()
             p_meas = data["SourcePressure"]
@@ -330,19 +340,26 @@ class BurkertGateway(CalboxDevice):
 
         self._set_flags(flags)
 
-    def reset_background(self, detector_idx: int = 0) -> None:
+    def reset_background(self, detector_idx: Optional[int] = None) -> None:
         """Cancel a running background (but leave source flushing if it already is running)"""
         if self._option_2b:
-            assert detector_idx == 0 or detector_idx == 1
+            assert detector_idx == 0 or detector_idx == 1 or detector_idx is None
         else:
-            assert detector_idx == 0
-        if self._option_2b:
+            assert detector_idx == 0 or detector_idx is None
+        if detector_idx is not None and self._option_2b:
             # all of these are switched from a single DIO
             bg_idx = 4 + detector_idx
             internal_blower_idx = bg_idx
             external_blower_idx = bg_idx
             cutoff_valve_idx = bg_idx
             stack_blower_idx = bg_idx
+        elif detector_idx is None and self._option_2b:
+            # set both detectors out of background
+            internal_blower_idx = 4
+            external_blower_idx = 5
+            cutoff_valve_idx = 4
+            stack_blower_idx = 5
+
         else:
             internal_blower_idx = 4
             external_blower_idx = 5
@@ -365,8 +382,7 @@ class BurkertGateway(CalboxDevice):
     def reset_all(self) -> None:
         """return to idle state"""
         self.reset_flush()
-        self.reset_background(0)
-        #self.reset_background(1)
+        self.reset_background()
 
     @property
     def analogue_states(self) -> Dict[str, float]:
