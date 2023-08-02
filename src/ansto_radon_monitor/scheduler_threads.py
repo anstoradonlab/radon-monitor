@@ -415,6 +415,14 @@ class CalibrationUnitThread(DataThread):
                         ip_address=ip_address,
                         flush_flow_rate=flush_flow_rate,
                         inject_flow_rate=inject_flow_rate,
+                        option_2b=False,
+                    )
+                elif self._kind == "burkertmodel1-2b":
+                    self._device = BurkertGateway(
+                        ip_address=ip_address,
+                        flush_flow_rate=flush_flow_rate,
+                        inject_flow_rate=inject_flow_rate,
+                        option_2b=True,
                     )
                 elif self._kind == "none":
                     self._device = None

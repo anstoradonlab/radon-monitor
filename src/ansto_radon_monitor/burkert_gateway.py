@@ -22,20 +22,10 @@ class BurkertGateway(CalboxDevice):
     MFC_SETPOINT_ADDRESS = 2
     DIGITAL_IO_ADDRESS = 0
     NUM_DIO = 8  # number of DIO lines (coils, in modbus terms)
-    FLAG_NAMES = (
-        "SourceFlush",
-        "SourceFlushExhaust",
-        "Inject1",
-        "Inject2",
-        "DisableInternalBlower",
-        "DisableExternalBlower",
-        "ActivateCutoffValve",
-        "DisableStackBlower",
-    )
     MFC_DEFAULT_FLOW = 0.5 # L/min
     BYTEORDER = {"byteorder":Endian.Big, "wordorder":Endian.Big}
 
-    def __init__(self, ip_address: str, flush_flow_rate: float, inject_flow_rate: float):
+    def __init__(self, ip_address: str, flush_flow_rate: float, inject_flow_rate: float, option_2b=False):
         """
         Control a Burket calibration unit.
 
@@ -67,8 +57,20 @@ class BurkertGateway(CalboxDevice):
         7 - Disable stack blower
 
         NOTE: we don't have enough coils to use this approach (one coil per function) for
-        two detectors.  We could instead combine multiple functions on each or add a second
-        ME43 module.
+        two detectors.  For option_2b (the two background option) the coils are re-defined
+        like this:
+
+        Coils
+        0 - Valve 1
+        1 - Valve 2
+        2 - Valve 3
+        3 - Valve 4
+        4 - Enable background mode on detector 1
+        5 - Enable background mode on detector 2
+        6 - unused
+        7 - unused
+
+        and each of the "background" digital outputs are connected to three relays.
 
         Read-only registers (modbus FC04, pymodbus client.read_input_registers)
         Address     Length      Datatype       Name
@@ -85,6 +87,28 @@ class BurkertGateway(CalboxDevice):
         2           2           Float          MFC flow rate set point (l/min at STP, aka Nl/min)
 
         """
+        self._option_2b = option_2b
+        if option_2b:
+            self.FLAG_NAMES = (
+                "SourceFlush",
+                "SourceFlushExhaust",
+                "Inject1",
+                "Inject2",
+                "Background1",
+                "Background2",
+            )
+        else:
+            self.FLAG_NAMES = (
+                "SourceFlush",
+                "SourceFlushExhaust",
+                "Inject1",
+                "Inject2",
+                "DisableInternalBlower",
+                "DisableExternalBlower",
+                "ActivateCutoffValve",
+                "DisableStackBlower",
+            )
+
         _logger.info(f"Trying to connect to Burkert Calbox at IP address {ip_address}")
         self._ip_address = ip_address
         if flush_flow_rate is not None:
@@ -239,16 +263,26 @@ class BurkertGateway(CalboxDevice):
 
     def start_background(self, detector_idx: int = 0) -> None:
         """Put detector in background mode"""
-        assert detector_idx == 0 # or detector_idx == 1
+        if self._option_2b:
+            assert detector_idx == 0 or detector_idx == 1
+        else:
+            assert detector_idx == 0
         # choose the valve and bg flag matching this detector
-        if detector_idx == 0:
+        inject_valve_idx = 2 + detector_idx
+        if self._option_2b:
+            # all of these are switched from a single DIO
+            bg_idx = 4 + detector_idx
+            internal_blower_idx = bg_idx
+            external_blower_idx = bg_idx
+            cutoff_valve_idx = bg_idx
+            stack_blower_idx = bg_idx
+        else:
             internal_blower_idx = 4
             external_blower_idx = 5
             cutoff_valve_idx = 6
             stack_blower_idx = 7
-            valve_idx = 2 + detector_idx
         flags = self._read_flags()
-        if flags[valve_idx] == True:
+        if flags[inject_valve_idx] == True:
             # current detector is injecting, so cancel this before switching to BG
             self.reset_calibration()
         flags[internal_blower_idx] = True
@@ -260,8 +294,18 @@ class BurkertGateway(CalboxDevice):
 
     def reset_background(self, detector_idx: int = 0) -> None:
         """Cancel a running background (but leave source flushing if it already is running)"""
-        assert detector_idx == 0 #or detector_idx == 1
-        if detector_idx == 0:
+        if self._option_2b:
+            assert detector_idx == 0 or detector_idx == 1
+        else:
+            assert detector_idx == 0
+        if self._option_2b:
+            # all of these are switched from a single DIO
+            bg_idx = 4 + detector_idx
+            internal_blower_idx = bg_idx
+            external_blower_idx = bg_idx
+            cutoff_valve_idx = bg_idx
+            stack_blower_idx = bg_idx
+        else:
             internal_blower_idx = 4
             external_blower_idx = 5
             cutoff_valve_idx = 6
@@ -315,10 +359,12 @@ class BurkertGateway(CalboxDevice):
                     sl.append("Injecting from source into detector 2")
                 elif fd["SourceFlush"]:
                     sl.append("Flushing source")
-                if fd["DisableInternalBlower"]:
+                if (not self._option_2b) and fd["DisableInternalBlower"]:
                     sl.append("Performing background on detector 1")
-                #if fd["DisableInternalBlower2"]:
-                #    sl.append("Performing background on detector 2")
+                elif self._option_2b and fd["Background1"]:
+                    sl.append("Performing background on detector 1")
+                elif self._option_2b and fd["Background2"]:
+                    sl.append("Performing background on detector 2")
 
                 s = ", ".join(sl)
 
