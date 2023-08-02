@@ -2,6 +2,14 @@
 Changelog
 =========
 
+Version 10.7.3
+==============
+Not yet released
+
+Bugfix release: during the flag calculation, reset to 0 after a startup event (to prevent
+labelling a long time period as a calibration/bg event following a software crash and restart)
+
+
 Version 10.7.2
 ==============
 27 June 2023

@@ -363,13 +363,6 @@ def column_definition(column_name):
     using ',' and then used as a CREATE TABLE argument
     """
 
-    # Special columns - foreign key support
-    if column_name in ["DetectorName"]:
-        return (
-            "DetectorName INTEGER, "
-            "FOREIGN KEY(DetectorName) REFERENCES detector_names(id)"
-        )
-
     dtype = ""
     # standard data columns - return a definition like: "column_name data_type"
     # e.g. "Datetime timestamp"
@@ -398,6 +391,7 @@ def column_definition(column_name):
         "AirT": "FLOAT",
         "LLD": "INTEGER",
         "ULD": "INTEGER",
+        "Site": "TEXT",
     }
 
     if k in known_cols:
@@ -566,6 +560,9 @@ class DataStore(object):
         # definitions = [" ".join([k, dtype]).strip() for k, dtype in zip(keys, dtypes)]
         # sql = f"CREATE TABLE {table_name} ({ ','.join(definitions) })"
         table_definition = ",".join((column_definition(itm) for itm in keys))
+        # Special columns - foreign key support
+        if "DetectorName" in keys:
+            table_definition += ", FOREIGN KEY(DetectorName) REFERENCES detector_names(id)"
         # -- use the 'if not exists' in case another thread beats us here
         sql = f"CREATE TABLE if not exists {table_name} ({table_definition})"
         _logger.debug(f"Executing SQL: {sql}")
@@ -993,6 +990,7 @@ class DataStore(object):
         start_time: Union[datetime.datetime, LatestRowToken],
         maxrows=600*24*10,
         recent=True,
+        with_approx_radon=True
     ):
         """
         Get data from table beginning with start_time
@@ -1125,7 +1123,7 @@ class DataStore(object):
                 data = [conv_date(itm) for itm in data]
             t_token = LatestRowToken(t, rowid_max)
 
-        if table_name == "Results":
+        if table_name == "Results" and with_approx_radon:
             data = self._calculate_approx_radon(data, dt=30.0*60.0)
 
         _logger.debug(
