@@ -53,7 +53,12 @@ def load_times_list(con_list, sql, is_t0_func, is_t1_func,
     """
     data = []
     for con in con_list:
-        data.extend(con.execute(sql).fetchall())
+        try:
+            data.extend(con.execute(sql).fetchall())
+        except sqlite3.OperationalError:
+            # possible for the sqlite query to fail, e.g. 
+            # sqlite3.OperationalError: no such column: Detector
+            pass
     data.sort(key=lambda x: x['Datetime'])
 
     # find t0,t1 pairs
@@ -88,7 +93,9 @@ def load_cals(con_list):
     def is_t0_func(itm):
         return itm["EventData"].startswith("Began injecting radon from calibration source into detector")
     def is_t1_func(itm):
-        return itm["EventData"] == "Left calibration state" or itm["EventData"] == "Shutdown"
+        return (itm["EventData"] == "Left calibration state" or
+                itm["EventData"] == "Shutdown" or
+                itm["EventData"] == "Startup")
     
     t1_offset = datetime.timedelta(hours=6)
     
@@ -128,7 +135,9 @@ def load_backgrounds(con_list: typing.List[sqlite3.Connection]) -> typing.List[t
     def is_t0_func(itm):
         return itm["EventData"].startswith("Began background cycle on detector")
     def is_t1_func(itm):
-        return itm["EventData"] == "Left background state" or itm["EventData"] == "Shutdown"
+        return (itm["EventData"] == "Left background state" or 
+                itm["EventData"] == "Shutdown" or 
+                itm["EventData"] == "Startup")
     
     times_list = load_times_list(con_list, sql, is_t0_func, is_t1_func)
     return times_list

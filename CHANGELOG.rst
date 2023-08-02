@@ -2,6 +2,15 @@
 Changelog
 =========
 
+Version 10.7.2
+==============
+27 June 2023
+
+Bugfix release: fix an error in the task scheduler which causes RDM to use 100% of the
+available cpu time after running for about a week.  With this fix, RDM will typically use
+less than 1% CPU during normal operation.
+
+
 Version 10.7.1
 ==============
 13 June 2023

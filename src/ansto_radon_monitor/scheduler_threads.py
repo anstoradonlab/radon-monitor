@@ -165,6 +165,27 @@ class DataThread(threading.Thread):
 
         self._scheduler.enter(delay=1, priority=0, action=self.update_heartbeat_time)
 
+        self.debug_print_interval = 3600
+        self.debug_print_offset = 65
+
+        # TODO: perhaps make this a configuration option
+        if False:
+            self.debug_print_task_queue()
+
+    def debug_print_task_queue(self):
+        # re-queue unless there is already a "print task queue" job in the queue
+        for task in self._scheduler.queue:
+            if task.action == self.debug_print_task_queue:
+                found_task = True
+                break
+            found_task = False
+        if not found_task:
+            delay = next_interval(time.time(), self.debug_print_interval, self.debug_print_offset)
+            self._scheduler.enter(delay=delay, priority=0, action=self.debug_print_task_queue)
+
+        task_descriptions = '\n --- '.join(["Task queue"] + self.task_queue_all)
+        _logger.info(task_descriptions)
+
     def shutdown(self):
         self.cancelled = True
         self.state_changed.set()
@@ -172,7 +193,14 @@ class DataThread(threading.Thread):
     def update_heartbeat_time(self):
         with self._heartbeat_time_lock:
             self._heartbeat_time = time.time()
-        self._scheduler.enter(delay=1, priority=0, action=self.update_heartbeat_time)
+        # re-queue unless there is already an "update heartbeat" job in the queue
+        for task in self._scheduler.queue:
+            if task.action == self.update_heartbeat_time:
+                found_task = True
+                break
+            found_task = False
+        if not found_task:
+            self._scheduler.enter(delay=1, priority=0, action=self.update_heartbeat_time)
 
     @property
     def heartbeat_age(self):
@@ -193,10 +221,23 @@ class DataThread(threading.Thread):
         _logger.debug(f"Reconnect function - stub")
 
     def shutdown_func(self):
+        """
+        This function is called at the very end of execution, after
+        the task scheduler has finished
+        """
         _logger.debug(f"Shutdown function")
+        # close the per-thread connection to the datastore
+        self._datastore.shutdown()
 
     @property
     def task_queue(self):
+        return self._task_queue(all=False)
+    
+    @property
+    def task_queue_all(self):
+        return self._task_queue(all=True)
+    
+    def _task_queue(self, all=False):
         """
         Human-readable version of the task queue
         """
@@ -205,16 +246,20 @@ class DataThread(threading.Thread):
             fmt = "%Y-%m-%d %H:%M:%S"
             return datetime.datetime.fromtimestamp(t).strftime(fmt)
 
-        def task_to_readable(task):
+        def task_to_readable(task, all=False):
             t = time_to_text(task.time)
             try:
                 desc = task.action.description
                 return f"{t} {desc}"
             except AttributeError:
-                return None
+                if all:
+                    desc = str(task.action)
+                    return f"{t} {desc}"
+                else:
+                    return None
 
         with self._lock:
-            ret = [task_to_readable(itm) for itm in self._scheduler.queue]
+            ret = [task_to_readable(itm, all=all) for itm in self._scheduler.queue]
             ret = [itm for itm in ret if not itm is None]
         return ret
 
@@ -560,6 +605,8 @@ class CalibrationUnitThread(DataThread):
             _ = self.status
 
     def shutdown_func(self):
+        # this closes the connection to the database
+        super().shutdown_func()
         # this should have no effect.  It's here in case of logic errors in shutdown
         # - a non-logging command to reset the device to its default state.
         if self._device is None:
@@ -1166,6 +1213,7 @@ class DataLoggerThread(DataThread):
         _logger.info(report_txt)
 
     def shutdown_func(self):
+        super().shutdown_func()
         # the CR1000 finalizer (__del__) closes the port and
         # sends a goodbye message to the datalogger.  It is
         # an 'implementation detail' of Cython that this will
