@@ -136,7 +136,7 @@ class BurkertGateway(CalboxDevice):
             # read, but ignore, this
             self._read_values()
             # set the MFC and valves to idle state
-            self.reset_all()
+            self.reset_all(pressurise=False)
             time.sleep(1.0)
         except ConnectionException as ex:
             _logger.error(f"Unable to connect to calibration box due to error: {ex}")
@@ -249,9 +249,10 @@ class BurkertGateway(CalboxDevice):
         self._set_flags(flags)
         self._set_mfc_flowrate(self._mfc_setpoint_inject)
 
-    def reset_flush(self) -> None:
+    def reset_flush(self, pressurise: bool = True) -> None:
         """Exit from source-flush mode"""
-        self.pressurise_source_capsule()
+        if pressurise:
+            self.pressurise_source_capsule()
         flags = self._read_flags()
         flags[0] = False
         flags[1] = False
@@ -379,9 +380,9 @@ class BurkertGateway(CalboxDevice):
         flags unchanged)"""
         self.reset_flush()
 
-    def reset_all(self) -> None:
+    def reset_all(self, pressurise: bool = True) -> None:
         """return to idle state"""
-        self.reset_flush()
+        self.reset_flush(pressurise=pressurise)
         self.reset_background()
 
     @property
