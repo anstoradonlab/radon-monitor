@@ -251,6 +251,7 @@ class BurkertGateway(CalboxDevice):
 
     def reset_flush(self) -> None:
         """Exit from source-flush mode"""
+        self.pressurise_source_capsule()
         flags = self._read_flags()
         flags[0] = False
         flags[1] = False
@@ -258,8 +259,45 @@ class BurkertGateway(CalboxDevice):
         flags[3] = False
         self._set_flags(flags)
         self._set_mfc_flowrate(0.0)
-        # todo: leave the source capsule with an overpressure of about 10 kPa
-        # (roughly the same pressure as a person can deliver from their lungs)
+    
+    def pressurise_source_capsule(self) -> None:
+        """Set pressure in source capsule to approx 10 kPa.
+        
+        This is roughly the same pressure as a person can deliver from their lungs)
+        e.g. https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4001942/"""
+
+        # as a secondary fail-safe, and regardless of what else happens, 
+        # never put in more than this much air to limit the overpressure
+        # to a relatively small value
+
+        target_source_pressure_pa = 10_000.0
+        max_volume_l = 0.1
+        max_time_sec = (max_volume_l / self.MFC_DEFAULT_FLOW) * 60
+        t0 = time.time()
+        # start pressurising
+        flags = self._read_flags()
+        flags[0] = True
+        flags[1] = False
+        flags[2] = False
+        flags[3] = False
+        self._set_flags(flags)
+        self._set_mfc_flowrate(self.MFC_DEFAULT_FLOW)
+
+        pressure_set_success = False
+        p_meas = None
+        while (time.time() - t0) < max_time_sec:
+            data = self._read_values()
+            p_meas = data["SourcePressure"]
+            if p_meas >= target_source_pressure_pa:
+                _logger.info("Pressure in source capsule reached target.")
+                pressure_set_success = True
+                break
+        if not pressure_set_success:
+            _logger.warning(f"Pressure in source capsule did not reach target.  Target: {target_source_pressure_pa/1000.0}, actual: {p_meas/1000.0:.04} kPa")
+        flags[0] = False
+        self._set_flags(flags)
+        self._set_mfc_flowrate(0.0)
+
 
     def start_background(self, detector_idx: int = 0) -> None:
         """Put detector in background mode"""
