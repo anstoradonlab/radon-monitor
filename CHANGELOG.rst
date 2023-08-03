@@ -2,11 +2,19 @@
 Changelog
 =========
 
-Version 10.7.3
+Version 10.8.0
 ==============
-Not yet released
+3 August 2023
 
-Bugfix release: during the flag calculation, reset to 0 after a startup event (to prevent
+- Add a new type of calibration box, "BurkertModel1-2b", a version of the Burkert 
+  compressed-gas calibration unit which has background-mode outputs for two radon
+  detectors
+- When driving a Burkert calibration box, slightly overpressure the source capsule
+  at the end of a flush or inject sequence to let the user detect leaks from the 
+  source capsule
+- GUI: display an estimate of the current radon concentration in the list of plots
+  as well as making the plots look a little nicer
+- Bugfix: during the flag calculation, reset to 0 after a startup event (to prevent
 labelling a long time period as a calibration/bg event following a software crash and restart)
 
 
