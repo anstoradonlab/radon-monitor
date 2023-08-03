@@ -231,7 +231,7 @@ class BurkertGateway(CalboxDevice):
         """
         for ii in range(self.NUM_RETRIES+1):
             try:
-                resp_list = self.read_values_worker()
+                resp_list = self._read_values_worker()
                 break
             except Exception as ex:
                 if ii == self.NUM_RETRIES:
