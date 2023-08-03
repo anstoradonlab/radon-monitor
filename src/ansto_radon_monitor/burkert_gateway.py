@@ -24,6 +24,8 @@ class BurkertGateway(CalboxDevice):
     NUM_DIO = 8  # number of DIO lines (coils, in modbus terms)
     MFC_DEFAULT_FLOW = 0.5 # L/min
     BYTEORDER = {"byteorder":Endian.Big, "wordorder":Endian.Big}
+    NUM_RETRIES = 10
+    RETRY_WAIT_INTERVAL = 0.1
 
     def __init__(self, ip_address: str, flush_flow_rate: float, inject_flow_rate: float, option_2b=False):
         """
@@ -143,15 +145,36 @@ class BurkertGateway(CalboxDevice):
             # TODO: how to communicate that the device didn't connect/isn't connected?
             raise
 
-    def _set_mfc_flowrate(self, setpoint_lpm):
-        """
-        Turn on flow through the MFC by setting the target flow rate to the defined setpoint
-        """
+    def _set_mfc_flowrate_worker(self, setpoint_lpm):
         builder = BinaryPayloadBuilder(**self.BYTEORDER)
         builder.add_32bit_float(setpoint_lpm)
         payload = builder.to_registers()
         self._client.write_registers(self.MFC_SETPOINT_ADDRESS, payload)
 
+
+    def _set_mfc_flowrate(self, setpoint_lpm):
+        """
+        Turn on flow through the MFC by setting the target flow rate to the defined setpoint
+        """
+        for ii in range(self.NUM_RETRIES+1):
+            try:
+                resp_list = self._set_mfc_flowrate_worker(setpoint_lpm)
+                break
+            except:
+                if ii == self.NUM_RETRIES:
+                    raise
+                time.sleep(self.RETRY_WAIT_INTERVAL)
+
+
+    def _read_flags_worker(self) -> List[bool]:
+        resp = self._client.read_coils(self.DIGITAL_IO_ADDRESS, 8)
+        # sometimes, perhaps also depending on the version of modbus lib,
+        # the response can be an exception
+        if issubclass(type(resp), Exception):
+            _logger.error(f"Modbus error {resp}")
+        resp_list = list(resp.bits)[: self.NUM_DIO]
+        return resp_list
+    
     def _read_flags(self) -> List[bool]:
         """
         return flags (True means on) for
@@ -159,13 +182,18 @@ class BurkertGateway(CalboxDevice):
         DisableInternalBlower, DisableExternalBlower,
         ActivateCutoffValve, DisableStackBlower]
         """
-        resp = self._client.read_coils(self.DIGITAL_IO_ADDRESS, 8)
-        return list(resp.bits)[: self.NUM_DIO]
+        for ii in range(self.NUM_RETRIES+1):
+            try:
+                resp_list = self._read_flags_worker()
+                break
+            except:
+                if ii == self.NUM_RETRIES:
+                    raise
+                time.sleep(self.RETRY_WAIT_INTERVAL)
+        
+        return resp_list
 
-    def _read_values(self):
-        """
-        read values from device
-        """
+    def _read_values_worker(self):
         address_count_name = [
             (0, 2, "SourcePressure"),
             (2, 2, "MfcFlowRate"),
@@ -195,10 +223,23 @@ class BurkertGateway(CalboxDevice):
 
         return data
 
-    def _read_constant_values(self):
+    def _read_values(self):
         """
-        Read 'acyclic' values (which I take to mean non-updating constants, e.g. serial number)
+        read values from device
         """
+        for ii in range(self.NUM_RETRIES+1):
+            try:
+                resp_list = self.read_values_worker()
+                break
+            except:
+                if ii == self.NUM_RETRIES:
+                    raise
+                time.sleep(self.RETRY_WAIT_INTERVAL)
+        
+        return resp_list
+
+
+    def _read_constant_values_worker(self):
         add_count_name_decoderfunc = [
             (849, 2, "Serial Number", lambda x: x.decode_32bit_uint()),
             (821, 10, "Device Name", lambda x: x.decode_string(10)),
@@ -211,12 +252,49 @@ class BurkertGateway(CalboxDevice):
             data[name] = decoded_val
         return data
 
-    def _set_flags(self, flags: List[bool]):
+    def _read_constant_values(self):
+        """
+        Read 'acyclic' values (which I take to mean non-updating constants, e.g. serial number)
+        """
+        for ii in range(self.NUM_RETRIES+1):
+            try:
+                resp_list = self._read_constant_values_worker()
+                break
+            except:
+                if ii == self.NUM_RETRIES:
+                    raise
+                time.sleep(self.RETRY_WAIT_INTERVAL)
+        
+        return resp_list
+
+
+    def _set_flags_worker(self, flags: List[bool]):
         """ """
         assert len(flags) == self.NUM_DIO
         flags_to_send = list(flags) + [False] * (8 - self.NUM_DIO)
         resp = self._client.write_coils(self.DIGITAL_IO_ADDRESS, flags_to_send)
-        # TODO check for error
+        # basic check for error - resp should have .address and .count fields
+        # and this will raise an exception we have some other object instead
+        _ = resp.address
+        _ = resp.count
+
+    def _set_flags(self, flags: List[bool]):
+        """Set DIO flags
+
+        Parameters
+        ----------
+        flags : List[bool]
+            List of boolean values, True is high (1)
+        """
+        for ii in range(self.NUM_RETRIES+1):
+            try:
+                self._set_flags_worker(flags)
+                break
+            except:
+                if ii == self.NUM_RETRIES:
+                    raise
+                time.sleep(self.RETRY_WAIT_INTERVAL)
+        
 
     def flush(self) -> None:
         """Start source-flush by
