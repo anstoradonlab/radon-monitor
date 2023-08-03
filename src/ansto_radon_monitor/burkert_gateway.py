@@ -206,6 +206,8 @@ class BurkertGateway(CalboxDevice):
 
         for addr, count, name in address_count_name:
             result = self._client.read_input_registers(addr, count=count)
+            if issubclass(type(result), Exception):
+                raise result
             if count == 2:
                 decoder = BinaryPayloadDecoder.fromRegisters(result.registers, **self.BYTEORDER)
                 decoded_val = decoder.decode_32bit_float()
@@ -231,9 +233,10 @@ class BurkertGateway(CalboxDevice):
             try:
                 resp_list = self.read_values_worker()
                 break
-            except:
+            except Exception as ex:
                 if ii == self.NUM_RETRIES:
                     raise
+                _logger.error(f"Modbus error: {repr(ex)}.  Retrying...")
                 time.sleep(self.RETRY_WAIT_INTERVAL)
         
         return resp_list
