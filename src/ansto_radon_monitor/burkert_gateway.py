@@ -1,6 +1,6 @@
 from pymodbus.client.sync import ModbusTcpClient
 from pymodbus.payload import BinaryPayloadDecoder, BinaryPayloadBuilder
-from pymodbus.constants import Endian
+from pymodbus.constants import Endian, Defaults
 from pymodbus.exceptions import ConnectionException
 import time
 import logging
@@ -12,6 +12,8 @@ from .calbox_device import CalboxDevice
 
 _logger = logging.getLogger(__name__)
 
+# globally set modbus timeout (default value is 3)
+Defaults.Timeout = 10
 
 class BurkertGateway(CalboxDevice):
     """
