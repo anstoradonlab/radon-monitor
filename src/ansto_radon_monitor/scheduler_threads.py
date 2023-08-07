@@ -2004,9 +2004,13 @@ def sync_folder_to_ftp(
        .ftp-sync-marker
        This is the only piece of information used to decide whether or not to
        upload files.  Any file which has a modification time newer than
-       .ftp-sync-marker is sent to the ftp server.  The contents of the
-       server is not examined at all.
+       .ftp-sync-marker is sent to the ftp server.  
      - probably others exist too
+
+    The contents of the server are not used to decide which files to upload,
+    but once an upload completes this function checks the size of the file
+    on the server and raises an error if it doesn't match the size of the
+    local file.
 
     Arguments
     =========
@@ -2062,7 +2066,18 @@ def sync_folder_to_ftp(
                 # upload file or create dir
                 if source.is_file():
                     _logger.info(f"Sync to FTP, uploading: {str(source)}")
+                    t0 = time.time()
                     ftp.storbinary(f"STOR {dest_file}", source.open("rb"))
+                    dt = time.time() - t0
+                    # check that the file was transferred in full
+                    size_on_server = ftp.size(dest_file)
+                    if size_on_server is not None:
+                        local_size = source.stat().st_size
+                        if not local_size == size_on_server:
+                            raise RuntimeError(f"Uploaded {source} but size on server does not match file size (file size = {local_size}, uploaded file size = {size_on_server})")
+                        else:
+                            bytes_per_sec = local_size / dt
+                            _logger.info(f"Finished uploading {str(source)} ({int(local_size):_} bytes, {int(bytes_per_sec):_} bytes/sec)")
                 elif source.is_dir():
                     try:
                         ftp.mkd(dest_file)
