@@ -959,8 +959,9 @@ class CalibrationUnitThread(DataThread):
             status["message"] = "no connection"
         else:
             if threading.get_ident() == self._thread_ident:
-                status = self._device.status
-                self._status_cache = status
+                with self._lock:
+                    status = self._device.status
+                    self._status_cache = status
             else:
                 # use the cache if we are not inside the thread
                 # which is permitted to talk to the hardware

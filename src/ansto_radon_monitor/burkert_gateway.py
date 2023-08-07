@@ -1,3 +1,4 @@
+import threading
 from pymodbus.client.sync import ModbusTcpClient
 from pymodbus.payload import BinaryPayloadDecoder, BinaryPayloadBuilder
 from pymodbus.constants import Endian, Defaults
@@ -12,8 +13,8 @@ from .calbox_device import CalboxDevice
 
 _logger = logging.getLogger(__name__)
 
-# globally set modbus timeout (default value is 3)
-Defaults.Timeout = 10
+# # globally set modbus timeout (default value is 3)
+# Defaults.Timeout = 10
 
 class BurkertGateway(CalboxDevice):
     """
@@ -115,6 +116,7 @@ class BurkertGateway(CalboxDevice):
 
         _logger.info(f"Trying to connect to Burkert Calbox at IP address {ip_address}")
         self._ip_address = ip_address
+        self._thread_id = threading.get_ident()
         if flush_flow_rate is not None:
             self._mfc_setpoint_flush = flush_flow_rate
         else:
@@ -125,10 +127,15 @@ class BurkertGateway(CalboxDevice):
             self._mfc_setpoint_inject = self.MFC_DEFAULT_FLOW
 
         self.serial_number = None
-        # this is able to connect even if ip_address is wrong
-        # (but will fail later)
         self._client = ModbusTcpClient(ip_address)
         try:
+            for ii in range(10):
+                connected = self._client.connect()
+                if connected:
+                    _logger.info(f"Connected to modbus server, socket: {self._client.socket.getsockname()}")
+                    break
+                time.sleep(0.1)
+                
             # to establish the connection:
             #  1. read some data
             #  2. pause for a bit
@@ -143,7 +150,7 @@ class BurkertGateway(CalboxDevice):
             self.reset_all(pressurise=False)
             time.sleep(1.0)
         except ConnectionException as ex:
-            _logger.error(f"Unable to connect to calibration box due to error: {ex}")
+            _logger.error(f"Unable to connect to calibration box due to error: {repr(ex)}")
             # TODO: how to communicate that the device didn't connect/isn't connected?
             raise
 
@@ -276,6 +283,7 @@ class BurkertGateway(CalboxDevice):
     def _set_flags_worker(self, flags: List[bool]):
         """ """
         assert len(flags) == self.NUM_DIO
+        assert threading.get_ident() == self._thread_id
         flags_to_send = list(flags) + [False] * (8 - self.NUM_DIO)
         resp = self._client.write_coils(self.DIGITAL_IO_ADDRESS, flags_to_send)
         # basic check for error - resp should have .address and .count fields
@@ -378,7 +386,7 @@ class BurkertGateway(CalboxDevice):
 
         pressure_set_success = False
         p_meas = None
-        _logger.info(f"Pressurising source capsule to {target_source_pressure_pa} kPa.")
+        _logger.info(f"Pressurising source capsule to {target_source_pressure_pa/1000.0} kPa.")
         while (time.time() - t0) < max_time_sec:
             data = self._read_values()
             p_meas = data["SourcePressure"]
