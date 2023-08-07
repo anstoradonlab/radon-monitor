@@ -2,9 +2,19 @@
 Changelog
 =========
 
+Version 10.8.1
+==============
+7 August 2023
+
+- Improve initial connection to Burkert calibration box
+- Improve error handling with Burkert calibration box
+- Improve FTP upload by checking file size on server after file upload
+
 Version 10.8.0
 ==============
 3 August 2023
+Not released because of poorly handled communication errors when used with
+Burkert calibration box
 
 - Add a new type of calibration box, "BurkertModel1-2b", a version of the Burkert 
   compressed-gas calibration unit which has background-mode outputs for two radon
