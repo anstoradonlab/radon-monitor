@@ -2065,51 +2065,50 @@ def sync_folder_to_ftp(
 
     try:
         # use FTP to upload files
-        with FTP(server) as ftp:
-            ftp.login(user=user, passwd=passwd)
-
-            remote_cwd = "/"
-            ftp.cwd(remote_cwd)
-            for source, dest_dir, dest_file in uploads:
-                # change dir on remote, only if needed, handle
-                # creating dir if necessary
-                if not dest_dir == remote_cwd:
-                    try:
-                        ftp.cwd(dest_dir)
-                    except ftplib.error_perm:
-                        # TODO: handle multiple levels?
-                        ftp.mkd(dest_dir)
-                        ftp.cwd(dest_dir)
-                    remote_cwd = dest_dir
-                # upload file or create dir
-                if source.is_file():
-                    _logger.info(f"Sync to FTP, uploading: {str(source)}")
-                    t0 = time.time()
-                    source_mtime = source.stat().st_mtime
-                    ftp.storbinary(f"STOR {dest_file}", source.open("rb"))
-                    dt = time.time() - t0
-                    # check that the file was transferred in full
-                    size_on_server = ftp.size(dest_file)
-                    if size_on_server is not None:
-                        local_size = source.stat().st_size
-                        if not local_size == size_on_server:
-                            raise RuntimeError(f"Uploaded {source} but size on server does not match file size (file size = {local_size}, uploaded file size = {size_on_server})")
-                        elif not source_mtime == source.stat().st_mtime:
-                            _logger.error(f"Uploaded {source} to FTP server but the file has been modified in the meantime.  It will be uploaded again on next sync.")
-                        else:
-                            bytes_per_sec = local_size / dt
-                            _logger.info(f"Finished uploading {int(local_size):_} bytes ({int(bytes_per_sec):_} bytes/sec)")
-                            # update the information about when this file was updated
-                            t0_dict[str(source)] = source_mtime
-                            jsondata = json.dumps(t0_dict)
-                            with open(sync_ref, 'wt') as fd:
-                                fd.write(jsondata)
-                elif source.is_dir():
-                    try:
-                        ftp.mkd(dest_file)
-                    except ftplib.error_perm:
-                        # likely that this folder already exists
-                        pass
+        ftp = FTP(host=server, user=user, passwd=passwd)
+        remote_cwd = "/"
+        ftp.cwd(remote_cwd)
+        for source, dest_dir, dest_file in uploads:
+            # change dir on remote, only if needed, handle
+            # creating dir if necessary
+            if not dest_dir == remote_cwd:
+                try:
+                    ftp.cwd(dest_dir)
+                except ftplib.error_perm:
+                    # TODO: handle multiple levels?
+                    ftp.mkd(dest_dir)
+                    ftp.cwd(dest_dir)
+                remote_cwd = dest_dir
+            # upload file or create dir
+            if source.is_file():
+                _logger.info(f"Sync to FTP, uploading: {str(source)}")
+                t0 = time.time()
+                source_mtime = source.stat().st_mtime
+                ftp.storbinary(f"STOR {dest_file}", source.open("rb"))
+                dt = time.time() - t0
+                # check that the file was transferred in full
+                size_on_server = ftp.size(dest_file)
+                if size_on_server is not None:
+                    local_size = source.stat().st_size
+                    if not local_size == size_on_server:
+                        raise RuntimeError(f"Uploaded {source} but size on server does not match file size (file size = {local_size}, uploaded file size = {size_on_server})")
+                    elif not source_mtime == source.stat().st_mtime:
+                        _logger.error(f"Uploaded {source} to FTP server but the file has been modified in the meantime.  It will be uploaded again on next sync.")
+                    else:
+                        bytes_per_sec = local_size / dt
+                        _logger.info(f"Finished uploading {int(local_size):_} bytes ({int(bytes_per_sec):_} bytes/sec)")
+                        # update the information about when this file was updated
+                        t0_dict[str(source)] = source_mtime
+                        jsondata = json.dumps(t0_dict)
+                        with open(sync_ref, 'wt') as fd:
+                            fd.write(jsondata)
+            elif source.is_dir():
+                try:
+                    ftp.mkd(dest_file)
+                except ftplib.error_perm:
+                    # likely that this folder already exists
+                    pass
+        ftp.quit()
     except Exception as ex:
         _logger.error(
             f"Failed to sync files to FTP server: {server}, user:{user}, "
