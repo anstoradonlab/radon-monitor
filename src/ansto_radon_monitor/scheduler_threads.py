@@ -1986,6 +1986,69 @@ class DataMinderThread(DataThread):
             self._tolerate_hang = False
 
 
+def retrying_upload(ftp: ftplib.FTP, source: Path, dest_file: str, dest_dir: str, 
+                            host:str, user:str, passwd:str, num_retries: int=5):
+    """Upload a file to FTP server, reconnecting on failure
+
+    Args:
+        ftp (ftplib.FTP): existing connection to FTP server, with the cwd already set correctly
+
+        source (Path): 
+            source file on local file system
+        dest_file (str): 
+            destination file name
+
+        *These next four arguments are used for resuing the connection to the FTP server*
+        dest_dir (str): destination directory on FTP server
+        host (str): FTP server hostname
+        user (str): FTP server user name
+        passwd (str): FTP server password
+
+        num_retries (int, optional): The number of times to re-try the connection. Defaults to 5.
+
+    Raises:
+        ex: the error from the FTP object if num_retries is exceeded
+
+    Returns:
+        ftplib.FTP: 
+        a connection to the FTP object.  This will be the original one in the case of no errors.
+    """
+    for ii in range(num_retries+1):
+        if ii == 0:
+            byte_offset = 0
+        else:
+            try:
+                size_on_server = ftp.size(dest_file)
+                if size_on_server is not None:
+                    byte_offset = size_on_server
+            except:
+                byte_offset = 0
+
+        try:
+            if byte_offset == 0:
+                with source.open("rb") as fd:
+                    ftp.storbinary(f"STOR {dest_file}", fd)
+                break
+            else:
+                with source.open("rb") as fd:
+                    _logger.info(f"Trying to resume upload of {str(source)} from byte {byte_offset:_}")
+                    fd = source.open("rb")
+                    fd.seek(byte_offset)
+                    ftp.storbinary(f"STOR {dest_file}", fd, rest=byte_offset)
+                break
+        except Exception as ex:
+            if ii == num_retries:
+                raise ex
+            _logger.error(
+                f"Failed to upload {str(source)} to FTP server because of error: {ex}.  Retries remaining = {num_retries - ii}"
+            )
+            # re-connect, allowing the old connection to time out
+            ftp = FTP(host=host, user=user, passwd=passwd)
+            ftp.cwd(dest_dir)
+
+    return ftp
+
+
 def sync_folder_to_ftp(
     dirname_local,
     server,
@@ -2084,7 +2147,7 @@ def sync_folder_to_ftp(
                 _logger.info(f"Sync to FTP, uploading: {str(source)}")
                 t0 = time.time()
                 source_mtime = source.stat().st_mtime
-                ftp.storbinary(f"STOR {dest_file}", source.open("rb"))
+                ftp = retrying_upload(ftp, source=source, dest_file=dest_file, dest_dir=dest_dir, host=server, user=user, passwd=passwd)
                 dt = time.time() - t0
                 # check that the file was transferred in full
                 size_on_server = ftp.size(dest_file)
