@@ -2021,9 +2021,27 @@ def sync_folder_to_ftp(
     if not dirname_remote.startswith("/"):
         dirname_remote = "/" + dirname_remote
 
+    t0_dict = {}
     sync_ref = Path(dirname_local, ".ftp-sync-marker")
     if sync_ref.exists():
-        t0 = sync_ref.stat().st_mtime
+        if sync_ref.stat().st_size == 0:
+            # file size is 0, the mtime of .ftp-sync-marker indicates
+            # the time of the last successful sync.  From version of RDM
+            # before the switch to json data inside .ftp-sync-marker
+            t0 = sync_ref.stat().st_mtime
+        else:
+            # file size is nonzero, the file contains json data about 
+            # when each of the files was last uploaded
+            try:
+                # t0_dict will be a dictionary with
+                # {FILE_NAME_AS_STR: last_upload_time_as_integer_in_stat.st_mtime_units}
+                with open(sync_ref, 'rt') as fd:
+                    jsondata = fd.read()
+                t0_dict = json.loads(jsondata)
+                t0 = 0
+            except:
+                _logger.error("Unable to read .ftp-sync-marker")
+                t0 = 0
     else:
         t0 = 0
 
@@ -2037,7 +2055,7 @@ def sync_folder_to_ftp(
     uploads = []
     for p in Path(dirname_local).rglob("*"):
         relp = p.relative_to(dirname_local)
-        if p.stat().st_mtime > t0 and not matchany(relp):
+        if p.stat().st_mtime > t0_dict.setdefault(str(p), t0) and not matchany(relp):
             source = p
             dest_dir = Path(dirname_remote).joinpath(relp.parent).as_posix()
             dest_file = relp.parts[-1]
@@ -2067,6 +2085,7 @@ def sync_folder_to_ftp(
                 if source.is_file():
                     _logger.info(f"Sync to FTP, uploading: {str(source)}")
                     t0 = time.time()
+                    source_mtime = source.stat().st_mtime
                     ftp.storbinary(f"STOR {dest_file}", source.open("rb"))
                     dt = time.time() - t0
                     # check that the file was transferred in full
@@ -2075,9 +2094,16 @@ def sync_folder_to_ftp(
                         local_size = source.stat().st_size
                         if not local_size == size_on_server:
                             raise RuntimeError(f"Uploaded {source} but size on server does not match file size (file size = {local_size}, uploaded file size = {size_on_server})")
+                        elif not source_mtime == source.stat().st_mtime:
+                            _logger.error(f"Uploaded {source} to FTP server but the file has been modified in the meantime.  It will be uploaded again on next sync.")
                         else:
                             bytes_per_sec = local_size / dt
-                            _logger.info(f"Finished uploading {str(source)} ({int(local_size):_} bytes, {int(bytes_per_sec):_} bytes/sec)")
+                            _logger.info(f"Finished uploading {int(local_size):_} bytes ({int(bytes_per_sec):_} bytes/sec)")
+                            # update the information about when this file was updated
+                            t0_dict[str(source)] = source_mtime
+                            jsondata = json.dumps(t0_dict)
+                            with open(sync_ref, 'wt') as fd:
+                                fd.write(jsondata)
                 elif source.is_dir():
                     try:
                         ftp.mkd(dest_file)
@@ -2091,5 +2117,3 @@ def sync_folder_to_ftp(
         )
         return
 
-    # on success, update the sync marker
-    sync_ref.touch()

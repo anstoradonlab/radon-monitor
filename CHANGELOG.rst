@@ -2,6 +2,14 @@
 Changelog
 =========
 
+Version 10.9
+============
+[not yet released]
+
+ - When backing up files to FTP, record the time of backup per-file instead of using a single
+   reference time for the entire data set.  This will help to prevent repeated uploads on
+   unreliable links.
+
 Version 10.8.1
 ==============
 7 August 2023
