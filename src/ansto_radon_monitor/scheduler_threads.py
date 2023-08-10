@@ -3,6 +3,7 @@ import copy
 import datetime
 import ftplib
 import functools
+import hashlib
 import json
 import logging
 import math
@@ -1899,6 +1900,11 @@ class DataMinderThread(DataThread):
                     dirname_remote=directory,
                 )
 
+    def update_checksums(self):
+        with self._backup_lock:
+            data_dir = self._config.data_dir
+            update_hash_record(data_dir)
+
     def sync_legacy_files(self, data_dir, include_archives=False):
         try:
             with self._csv_output_lock:
@@ -1957,6 +1963,10 @@ class DataMinderThread(DataThread):
         self.sync_legacy_files(data_dir=self._config.data_dir, include_archives=include_archives)
         self.archive_data(data_dir=self._config.data_dir)
         self.backup_active_database()
+        try:
+            self.update_checksums()
+        except Exception as ex:
+            _logger.error(f"Unable to calculate SHA256 checksums.  {traceback.format_exc()}")
         t = datetime.datetime.now(datetime.timezone.utc)
         _logger.info(f"Database backup, archive, and legacy file export took {t-t0}")
         self.upload_data()
@@ -1984,6 +1994,73 @@ class DataMinderThread(DataThread):
         self.update_heartbeat_time()
         with self._heartbeat_time_lock:
             self._tolerate_hang = False
+
+
+def matchany(p, patterns_to_match):
+    for pattern in patterns_to_match:
+        if p.match(pattern):
+            return True
+    return False
+
+def calc_hash(p, dirname_local=None):
+    """Calculate SHA256 hash
+     
+    This returns a one-line summary of the file name and SHA256 hash
+    in a form which is compatible with checking the file integrety later
+    using the command
+
+    > sha256sum --check [file-containing-list-of-hashes]
+
+
+    Args:
+        p (str,Path): File to check
+
+    Returns:
+        str: one line summary, checksum - space - a literal "*" character - file name
+    """
+    blocksize = 1024*1024
+    hasher = hashlib.sha256()
+    with open(p, 'rb') as fd:
+        data = fd.read(blocksize)
+        while data:
+            hasher.update(data)
+            data = fd.read(blocksize)
+    if dirname_local is not None:
+        p = p.relative_to(dirname_local).as_posix()
+    s = f"{hasher.hexdigest()} *{str(p)}"
+    return s
+
+def update_hash_record(dirname_local, 
+                       patterns_to_ignore=["current", "current/**", ".ftp-sync-marker", "*.log"]):
+    """Update the SHA256SUMS file for the current directory
+
+    Args:
+        dirname_local (Path, str): 
+            path to local dir
+
+        patterns_to_ignore (list, optional): 
+            Patterns to ignore (i.e. don't compute hash). 
+            Defaults to ["current", "current/**", ".ftp-sync-marker", "*.log"].
+
+            Note: .log files are excluded because they tend to be updated between the
+            time the hash is calculated but before they're backed up to the server.
+    """
+    p = Path(dirname_local)
+    hash_fname = "SHA256SUMS"
+    hash_path = p.joinpath(hash_fname)
+    patterns_to_ignore.append(hash_fname)
+    paths_to_hash = []
+
+    summary = []
+    for p in Path(dirname_local).rglob("*"):
+        relp = p.relative_to(dirname_local)
+        if p.is_file() and not matchany(relp, patterns_to_ignore):
+            summary.append(calc_hash(p, dirname_local).encode('utf-8'))
+
+    # binary mode, so that we create unix-style line endings
+    # 
+    with open(hash_path, 'wb') as fd:
+        fd.write(b'\n'.join(summary))
 
 
 def retrying_upload(ftp: ftplib.FTP, source: Path, dest_file: str, dest_dir: str, 
@@ -2114,17 +2191,11 @@ def sync_folder_to_ftp(
     else:
         t0 = 0
 
-    def matchany(p):
-        for pattern in patterns_to_ignore:
-            if p.match(pattern):
-                return True
-        return False
-
     # find out what needs to be uploaded
     uploads = []
     for p in Path(dirname_local).rglob("*"):
         relp = p.relative_to(dirname_local)
-        if p.stat().st_mtime > t0_dict.setdefault(str(p), t0) and not matchany(relp):
+        if p.stat().st_mtime > t0_dict.setdefault(str(p), t0) and not matchany(relp, patterns_to_ignore):
             source = p
             dest_dir = Path(dirname_remote).joinpath(relp.parent).as_posix()
             dest_file = relp.parts[-1]

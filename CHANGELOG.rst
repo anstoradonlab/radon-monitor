@@ -6,9 +6,14 @@ Version 10.9
 ============
 [not yet released]
 
- - When backing up files to FTP, record the time of backup per-file instead of using a single
-   reference time for the entire data set.  This will help to prevent repeated uploads on
-   unreliable links.
+ - When backing up files to FTP, (1) record the time of backup per-file instead of using a single
+   reference time for the entire data set and (2) attempt to resume interrupted uploads part way through.  
+   This will help with FTP over unreliable links.
+ - After backing up the active database, generate a "SHA256SUMS" file which includes checksums
+   of the data files.  Data integrity can be checked later, from a unix-like command prompt, by running::
+
+    sha256sum --check SHA256SUMS
+
 
 Version 10.8.1
 ==============
