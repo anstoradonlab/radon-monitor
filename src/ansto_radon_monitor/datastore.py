@@ -392,6 +392,7 @@ def column_definition(column_name):
         "LLD": "INTEGER",
         "ULD": "INTEGER",
         "Site": "TEXT",
+        "DetectorName": "INTEGER",
     }
 
     if k in known_cols:
@@ -891,7 +892,8 @@ class DataStore(object):
             sql = f"select max(Datetime) from {view_name}"
         else:
             detector_id = self.detector_id_from_name(detector_name)
-            sql = f"select max(Datetime) from {view_name} where DetectorName='{detector_id}'"
+            # query DetectorName as an int (i.e. use =1, not ='1')
+            sql = f"select max(Datetime) from {view_name} where DetectorName={detector_id}"
         most_recent_time = None
         try:
             tstr = tuple(cur.execute(sql).fetchall()[0])[0]
@@ -909,7 +911,7 @@ class DataStore(object):
         except sqlite3.OperationalError as ex:
             _logger.debug(f"SQL exception: {ex} while executing {sql}")
 
-        _logger.debug(
+        _logger.info(
             f"Executing SQL: {sql}, returned: {most_recent_time}, took: {datetime.datetime.now(datetime.timezone.utc)-t0}"
         )
         return most_recent_time
