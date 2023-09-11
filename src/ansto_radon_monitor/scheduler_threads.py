@@ -2068,7 +2068,13 @@ def sync_folder_to_ftp(
        This is the only piece of information used to decide whether or not to
        upload files.  Any file which has a modification time newer than
        .ftp-sync-marker is sent to the ftp server.  
+       .ftp-sync-marker is sent to the ftp server.  
      - probably others exist too
+
+    The contents of the server are not used to decide which files to upload,
+    but once an upload completes this function checks the size of the file
+    on the server and raises an error if it doesn't match the size of the
+    local file.
 
     The contents of the server are not used to decide which files to upload,
     but once an upload completes this function checks the size of the file
