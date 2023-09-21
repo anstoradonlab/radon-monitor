@@ -4,8 +4,9 @@ Changelog
 
 Version 10.9
 ============
-[not yet released]
+21 September 2023
 
+ - Fix an issue where duplicate values were retrieved from the datalogger and saved to the database
  - When backing up files to FTP, (1) record the time of backup per-file instead of using a single
    reference time for the entire data set and (2) attempt to resume interrupted uploads part way through.  
    This will help with FTP over unreliable links.
