@@ -4,6 +4,7 @@
 'Added RTV table: S.Werczynski, Feb-2007
 'Added RH/Temp and barometer sensors
 'Added more variables (ULD, AirT) to RTV, and retained RTV for 30 minutes: Alan Griffiths, Apr 2022
+'Changed cal factors for new T/RH and pressure sensors (factors for old sensors are commented out, RH cal is unchanged): Alan Griffiths, Oct 2023
 
 '----- DECLARATIONS
 PreserveVariables 
@@ -93,12 +94,14 @@ BeginProg
     VoltSE(HV,    1, mV2500, 2, False, 0, _60Hz, 1, 0) ' Log the high voltage setting (V)
  		portset(3,1)
 		Delay (0,150,mSec)
- 		VoltSe (AirT,1,mV2500,3,0,0,_60Hz,0.1,-40)
+    VoltSe (AirT,1,mV2500,3,0,0,_60Hz,0.14,-80)   'calibration factor for new HMP155 T/RH sensor
+ 		' VoltSe (AirT,1,mV2500,3,0,0,_60Hz,0.1,-40)  'calibration factor for old HMP45C T/RH sensor
     VoltSe (RelHum,1,mV2500,4,0,0,_60Hz,0.1,0)  
     portset(3,0)  
     ExciteV (Vx1,2500,0)
     Delay (0,1,Sec)
-    VoltSe (Pres,1,mV2500,5,0 ,0,_60Hz,.184,600)   
+    VoltSe (Pres,1,mV2500,5,0 ,0,_60Hz,.24, 500)  'calibration factors for new model barometric pressure sensor  
+    'VoltSe (Pres,1,mV2500,5,0 ,0,_60Hz,.184,600) 'calibration factors for old model barometric pressure sensor
     VoltSE(InFlow,1,mV2500,6,False,0,_60Hz,.010417,-5) 		' Read flow rate through head #1 (cal assumes R=120ohms)     
     PulseCount(LLD, 1, 1, 0, 0, 1, 0)              ' Counts on lower level discriminator (raw radon)
     PulseCount(ULD, 1, 2, 0, 0, 1, 0)              ' Counts on upper level discriminator
