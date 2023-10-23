@@ -9,12 +9,15 @@
 *.log
 *.pot
 __pycache__/*
+*/__pycache__
 .cache/*
 .*.swp
 */.ipynb_checkpoints/*
 .DS_Store
 .mypy_cache
 *.db
+
+**.exe
 
 # Project files
 .ropeproject
@@ -51,6 +54,9 @@ MANIFEST
 
 # Per-project virtualenvs
 .venv*/
+venv*/
+minenv/
+installervenv/
 
 # Data folder and database, created when app runs
 data/
@@ -58,3 +64,5 @@ data/
 
 # Profile output
 *.py.prof
+# build directory for fbs
+target/

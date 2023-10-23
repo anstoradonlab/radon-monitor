@@ -1,0 +1,10 @@
+# Custom environment for creating windows installer
+
+name: radonmonitor
+
+channels:
+ - defaults
+
+dependencies:
+ - python=3.6
+ - pip

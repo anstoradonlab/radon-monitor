@@ -1,0 +1,20 @@
+# Configuration for ANSTO two filter radon detector
+# Basic config, one 1500 L detector
+
+detectors:
+  - detector_kind: "L1500"
+    serial_port: "serial:/dev/ttyUSB0:115200"
+    name: "TEST-002M"
+    datalogger_serial: -1
+
+calbox:
+  kind: "generic"
+  labjack_id: -1
+  labjack_serial: -1
+  flush_duration_sec: 3600
+  inject_duration_sec: 3600
+  background_duration_sec: 3600
+
+# allowed log levels (from least output to most):
+# CRITICAL, ERROR, WARNING, INFO, DEBUG
+loglevel: "DEBUG"

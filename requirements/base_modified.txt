@@ -1,0 +1,5 @@
+fbs
+PyQt5==5.9.2
+pyqtgraph
+PyCampbellCR1000
+#git+https://github.com/picotech/picosdk-python-wrappers.git

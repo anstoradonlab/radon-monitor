@@ -1,0 +1,6 @@
+{
+    "app_name": "RDM",
+    "author": "Alan Griffiths",
+    "main_module": "src/main/python/main.py",
+    "version": "10.9.0"
+}

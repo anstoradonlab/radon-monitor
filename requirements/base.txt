@@ -1,0 +1,7 @@
+fbs
+PyQt5==5.9.2
+pyqtgraph
+#PyCampbellCR1000
+#pyzmq==21.0.2
+git+https://github.com/anstoradonlab/radon-monitor.git
+#../radon-monitor

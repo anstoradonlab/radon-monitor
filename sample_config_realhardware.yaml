@@ -1,25 +1,18 @@
 # Configuration for ANSTO two filter radon detector
 # Basic config, one 1500 L detector
 
-data_dir: "./data"
-logfile: "./data/radon_monitor_messages.log"
-
+data_dir: "./data-hw"
 
 detectors:
   # detector_kind sets the type of radon detector.  Options are:
   #  "L1500" - standard 1500 litre detector
   #  "L200" - standard 200 litre detector
   #  "mock" - used for testing without a connected radon detector
-  - kind: "mock"
+  - kind: "L1500"
     serial_port: "serial:/dev/ttyUSB0:115200"
-    name: "TEST_002M"
-    csv_file_pattern: "height02/{NAME}{MONTH}{YEAR}.CSV"
+    name: "TestDetector"
+    csv_file_pattern: "bare/{NAME}{MONTH}{YEAR}.CSV"
     datalogger_serial: -1
-  - kind: "mock"
-    serial_port: "serial:/dev/ttyUSB0:115200"
-    name: "TEST_050M"
-    datalogger_serial: -1
-    csv_file_pattern: "height50/{NAME}{MONTH}{YEAR}.CSV"
 
 
 calbox:
@@ -27,12 +20,12 @@ calbox:
   # most common one, designed to interface with a single radon detector.
   # There is also a kind called "mock" which can be used for testing the software
   # but which doesn't try to connect to hardware.
-  kind: "mock"
+  kind: "generic"
   # The labjack ID can be set in software.  A special value of -1 means
   # to use the first labjack found, which only makes sense if there is
   # only ever one labjack connected to the PC
   labjack_id: -1
-  # Only use the labjack with the serial number specifed here.  A special
+  # Only use the labjack with the serial number specified here.  A special
   # value of -1 means to ignore the serial number.
   labjack_serial: -1
   # Flushing duration to use during calibrations (seconds)
