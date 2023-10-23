@@ -1,0 +1,114 @@
+'It is intended to log the output of an ANSTO dual flow loop, two filter radon
+'detector using a CR800 logger.
+'Last modified: Scott Chambers, Feb-2007
+'Added RTV table: S.Werczynski, Feb-2007
+'Added RH/Temp and barometer sensors
+'Added more variables (ULD, AirT) to RTV, and retained RTV for 30 minutes: Alan Griffiths, Apr 2022
+
+'----- DECLARATIONS
+PreserveVariables 
+
+Public DaysInterval
+Public TimeSet
+Public CalDuration
+Public rTime(9), TankP, HV,  AirT, RelHum, Pres
+Public ExFlow, LLD, ULD, Gas_meter, PanTemp, InFlow
+Public BatV, Fract, flowcal
+Public d24, t6, t7, IsCal,day_yr, CalDelay
+Public now_d, now_h, now_m   ' day, hour, minute settings for Calibrate NOW
+Public Flag(4) as Boolean  	'Flag(1) to set 24hr timer on C2, Flag(2) to set 6hr timer on C4, Flag(3) to start manual pump, Flag(4) to start manual inject
+Public InTable as Boolean
+Public AutoCal as Boolean
+
+Alias rTime(1) = Year	'assign the alias Year to rTime(1)
+Alias rTime(2) = Month	'assign the alias Month to rTime(2)
+Alias rTime(3) = DayOfMonth	'assign the alias Day to rTime(3)
+Alias rTime(4) = Hour	'assign the alias Hour to rTime(4)
+Alias rTime(5) = Minute	'assign the alias Minute to rTime(5)
+Alias rTime(6) = Second	'assign the alias Second to rTime(6)
+Alias rTime(9) = DayOfYear	'assign the alias Day_of_Year to rTime(9)
+
+
+'----- OUTPUT TABLE
+DataTable(Results,true,-1)
+  OpenInterval       
+  DataInterval(0,30,Min,10) 
+  Totalize(1, ExFlow,     FP2, 0) 
+  Average (1, InFlow, FP2, 0)                   
+  Totalize(1, LLD,  IEEE4, 0)
+  Totalize(1, ULD,  IEEE4, 0)
+  Totalize(1, Gas_meter,  FP2, 0)
+  Average (1, AirT,   FP2, 0)
+  Average (1, RelHum,   FP2, 0)
+  Average (1, TankP,   FP2, 0)
+  Average (1, Pres,IEEE4, 0)
+  Average (1, HV,         FP2, 0)
+  Average (1, PanTemp,    FP2, 0)
+  Average (1, BatV,       FP2, 0)
+
+EndTable
+
+DataTable(RTV,true,180)
+  OpenInterval       
+  DataInterval(0,10,Sec,10)                   
+  Sample(1, ExFlow,FP2)
+  Sample (1, InFlow, FP2)
+  Sample(1, LLD,IEEE4)
+  Sample(1, ULD,IEEE4)
+  Sample(1, Pres,FP2)
+  Sample (1, TankP,FP2)
+  Sample (1, HV,FP2)
+  Sample (1, RelHum, FP2)
+  Sample (1, AirT, FP2)
+EndTable
+
+'----- MAIN PROGRAM
+
+BeginProg
+
+	If DaysInterval = NaN OR DaysInterval = 0 Then
+        DaysInterval = 28				' set calibration interval in days
+	EndIf  
+	If TimeSet = NaN OR TimeSet = 0 Then
+        TimeSet = 10						' set time of the day
+	EndIf
+	If CalDuration = NaN OR CalDuration = 0 Then
+        CalDuration = 6						' set duration of the calibration
+	EndIf
+
+	If CalDelay = NaN OR CalDelay = 0 Then
+        CalDelay = 6						' set delay before the calibration
+	EndIf
+	
+  If flowcal = NaN OR flowcal = 0 Then
+    flowcal = 0.0667          ' If not already defined set flow calibration factor for 2L cyclic volume flow meter
+  ENDIF 	
+
+	InTable= false
+      
+  Scan(10,Sec, 3, 0)
+    Battery(BatV)                                      ' Check logger power supply voltage (V)
+    PanelTemp(PanTemp, 250)                            ' Check the panel temperature of the logger (C)
+    VoltSE(TankP, 1, mV2500, 1, False, 0, _60Hz, 1, 0) ' Log millivolt output from tank pressure sensor
+    VoltSE(HV,    1, mV2500, 2, False, 0, _60Hz, 1, 0) ' Log the high voltage setting (V)
+ 		portset(3,1)
+		Delay (0,150,mSec)
+ 		VoltSe (AirT,1,mV2500,3,0,0,_60Hz,0.1,-40)
+    VoltSe (RelHum,1,mV2500,4,0,0,_60Hz,0.1,0)  
+    portset(3,0)  
+    ExciteV (Vx1,2500,0)
+    Delay (0,1,Sec)
+    VoltSe (Pres,1,mV2500,5,0 ,0,_60Hz,.184,600)   
+    VoltSE(InFlow,1,mV2500,6,False,0,_60Hz,.010417,-5) 		' Read flow rate through head #1 (cal assumes R=120ohms)     
+    PulseCount(LLD, 1, 1, 0, 0, 1, 0)              ' Counts on lower level discriminator (raw radon)
+    PulseCount(ULD, 1, 2, 0, 0, 1, 0)              ' Counts on upper level discriminator
+    PulseCount(Gas_meter, 1,11, 2, 0, 1, 0)            ' Uncalibrated flow rate of external flow loop from gas meter
+
+    ExFlow = Gas_meter*flowcal
+    
+    RealTime(rTime)
+ 	
+    CallTable Results 
+    CallTable RTV
+  NextScan
+EndProg
