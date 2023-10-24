@@ -1,4 +1,3 @@
-print("started in main.py")
 import logging
 import sys
 
@@ -8,10 +7,11 @@ from .mainwindow import MainWindow
 # from PyQt5.QtWidgets import QMainWindow
 from PyQt5 import QtCore, QtWidgets, uic
 
-setup_logging(loglevel=logging.DEBUG)
 
 
 def main():
+    print("Starting GUI")
+    setup_logging(loglevel=logging.DEBUG)
 
     # Ref for this idea: https://stackoverflow.com/questions/8786136/pyqt-how-to-detect-and-close-ui-if-its-already-running
     lockfile_path = QtCore.QDir.tempPath() + "/ansto_radon_monitor_gui.lock"
