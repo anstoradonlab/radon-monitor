@@ -20,7 +20,6 @@ from ansto_radon_monitor.main_controller import MainController, initialize
 from .c_and_b import CAndBForm
 from .data_plotter import DataPlotter
 from .data_view import DataViewForm
-from fbs_runtime.application_context.PyQt5 import ApplicationContext
 from PyQt5 import QtCore, QtGui, QtWidgets, uic
 # from PyQt5.QtWidgets import QMainWindow
 from PyQt5.QtCore import QSettings, Qt, QTimer
