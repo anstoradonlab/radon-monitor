@@ -6,11 +6,11 @@ from typing import Dict
 
 import numpy as np
 import pyqtgraph as pg
-from plotutils import groupby_series
+from .plotutils import groupby_series
 from PyQt5 import QtCore, QtWidgets
 from PyQt5.QtCore import QSettings, Qt, QTimer
 from pyqtgraph import PlotWidget
-from ui_data_view import Ui_DataViewForm
+from .ui_data_view import Ui_DataViewForm
 
 _logger = logging.getLogger(__name__)
 

@@ -6,7 +6,7 @@ import serial.tools.list_ports
 from ansto_radon_monitor.labjack_interface import list_all_u12
 from pycampbellcr1000 import CR1000
 from PyQt5 import QtCore, QtWidgets
-from ui_system_information import Ui_SystemInformationForm
+from .ui_system_information import Ui_SystemInformationForm
 
 
 # TODO: move these two funcs elsewhere (e.g. cr1000_interface.py?) and refactor

@@ -17,17 +17,17 @@ from ansto_radon_monitor.configuration import (Configuration,
                                                config_from_inifile)
 from ansto_radon_monitor.main import setup_logging
 from ansto_radon_monitor.main_controller import MainController, initialize
-from c_and_b import CAndBForm
-from data_plotter import DataPlotter
-from data_view import DataViewForm
+from .c_and_b import CAndBForm
+from .data_plotter import DataPlotter
+from .data_view import DataViewForm
 from fbs_runtime.application_context.PyQt5 import ApplicationContext
 from PyQt5 import QtCore, QtGui, QtWidgets, uic
 # from PyQt5.QtWidgets import QMainWindow
 from PyQt5.QtCore import QSettings, Qt, QTimer
-from sensitivity_sweep import SensitivitySweepForm
-from system_information import SystemInformationForm
-from timeout_dialog import TimeoutDialog
-from ui_mainwindow import Ui_MainWindow
+from .sensitivity_sweep import SensitivitySweepForm
+from .system_information import SystemInformationForm
+from .timeout_dialog import TimeoutDialog
+from .ui_mainwindow import Ui_MainWindow
 
 # import pandas as pd
 # import tabulate
@@ -108,16 +108,15 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
     # a signal which gets emitted when new data arrives
     # arguments are table_name, data
     data_update = QtCore.pyqtSignal(str, object)
+    application_name = "RDM"
 
-    def __init__(self, appctxt: ApplicationContext, *args, **kwargs):
-        # fbs application context
-        self.appctxt = appctxt
+    def __init__(self, *args, **kwargs):
         super(MainWindow, self).__init__(*args, **kwargs)
 
         if os.name == "nt":
             WindowsInhibitor.inhibit()
 
-        self.qsettings = QSettings("au.gov.ansto", appctxt.app.applicationName())
+        self.qsettings = QSettings("au.gov.ansto", self.application_name)
         _logger.debug(f"QSettings initialised at {self.qsettings.fileName()}")
 
         self.setupUi(self)

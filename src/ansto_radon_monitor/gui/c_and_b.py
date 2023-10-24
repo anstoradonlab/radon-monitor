@@ -3,9 +3,9 @@ import logging
 import math
 import time
 
-from cal_bg_start_time_widget import CalBgStartWidget
+from .cal_bg_start_time_widget import CalBgStartWidget
 from PyQt5 import QtCore, QtWidgets
-from ui_c_and_b import Ui_CAndBForm
+from .ui_c_and_b import Ui_CAndBForm
 
 _logger = logging.getLogger(__name__)
 
