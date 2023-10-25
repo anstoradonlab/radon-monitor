@@ -30,15 +30,11 @@ jobs:
     - name: Build with pyinstaller
       run: |
         pyinstaller --noconfirm src/RDM.spec
-    - name: Zip compress files
-      run: |
-        cd dist
-        Compress-Archive -Path RDM -Destination RDM.zip
     - name: Upload zip
       uses: actions/upload-artifact@v3.1.2
       with:
-          name: RDM.zip
-          path: dist/RDM.zip
+          name: RDM_no_installer
+          path: dist/RDM
     - name: Create installer
       uses: joncloud/makensis-action@v4
       with:
@@ -46,6 +42,6 @@ jobs:
     - name: Upload installer
       uses: actions/upload-artifact@v3.1.2
       with:
-          name: RDMSetup.exe
+          name: RDMSetup
           path: dist/RDMSetup.exe
         
