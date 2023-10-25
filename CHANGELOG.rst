@@ -2,6 +2,14 @@
 Changelog
 =========
 
+Version 10.10
+=============
+25 October 2023
+ - Sensitivty sweep: change limits on GUI inputs so that this is suitable for background sweep,
+   add noise handling.
+ - Bugfix: disable fitting column width for Datetime column, as this sometimes causes crashes.
+
+
 Version 10.9
 ============
 21 September 2023
