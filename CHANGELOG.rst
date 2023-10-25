@@ -4,7 +4,7 @@ Changelog
 
 Version 10.11
 =============
-[Release Date]
+25 October 2023
 
 - Similar functionality to version 10.10 but the GUI code has been merged into the same repository
   as the command-line/library code.
