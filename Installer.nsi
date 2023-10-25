@@ -1,9 +1,9 @@
 !include MUI2.nsh
 !include FileFunc.nsh
-!define MUI_ICON "..\icons\Icon.ico"
-!define MUI_UNICON "..\icons\Icon.ico"
+!define MUI_ICON ".\src\icons\Icon.ico"
+!define MUI_UNICON ".\src\icons\Icon.ico"
 
-!getdllversion "..\dist\RDM\RDM.exe" ver
+!getdllversion ".\dist\RDM\RDM.exe" ver
 !define VERSION "${ver1}.${ver2}.${ver3}.${ver4}"
 
 VIProductVersion "${VERSION}"
@@ -43,7 +43,7 @@ FunctionEnd
 ;General
 
   Name "RDM"
-  OutFile "..\dist\RDMSetup.exe"
+  OutFile "dist\RDMSetup.exe"
 
 ;--------------------------------
 ;Interface Settings
@@ -79,7 +79,7 @@ FunctionEnd
   "Software\Microsoft\Windows\CurrentVersion\Uninstall\RDM"
 Section
   SetOutPath "$InstDir"
-  File /r "..\dist\RDM\*"
+  File /r "dist\RDM\*"
   WriteRegStr SHCTX "Software\RDM" "" $InstDir
   WriteUninstaller "$InstDir\uninstall.exe"
   CreateShortCut "$SMPROGRAMS\RDM.lnk" "$InstDir\RDM.exe"

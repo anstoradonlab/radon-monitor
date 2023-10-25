@@ -11,10 +11,10 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3.5.2
-    - name: Set up Python 3.7
+    - name: Set up Python 3.6
       uses: actions/setup-python@v4.6.0
       with:
-        python-version: 3.7
+        python-version: 3.6
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
@@ -42,7 +42,7 @@ jobs:
     - name: Create installer
       uses: joncloud/makensis-action@v4
       with:
-          script-file: "scripts/Installer.nsi"
+          script-file: "Installer.nsi"
     - name: Upload installer
       uses: actions/upload-artifact@v3.1.2
       with:
