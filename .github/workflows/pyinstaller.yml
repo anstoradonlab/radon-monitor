@@ -1,5 +1,5 @@
 # create a windows binary using Pyinstaller, based on https://github.community/t/build-python-app-with-pyinstaller-in-github-actions/17044
-name: Pyinstaller - create windows binary
+name: Pyinstaller/NSIS - create windows binary
 
 on:
   push
@@ -39,9 +39,12 @@ jobs:
       uses: joncloud/makensis-action@v4
       with:
           script-file: "Installer.nsi"
+    - name: Rename installer file
+      run: |
+        mv dist/RDMSetup.exe dist/RDMSetup-${{github.ref_name}}.exe
     - name: Upload installer
       uses: actions/upload-artifact@v3.1.2
       with:
           name: RDMSetup
-          path: dist/RDMSetup.exe
+          path: dist/RDMSetup-${{github.ref_name}}.exe
         
