@@ -12,10 +12,9 @@ from typing import Dict, List, Optional, Union
 
 import numpy as np
 import pyqtgraph as pg
-import sip
 from ansto_radon_monitor.configuration import (Configuration,
-                                               config_from_inifile)
-from ansto_radon_monitor.main import setup_logging
+                                               config_from_inifile,
+                                               setup_logging)
 from ansto_radon_monitor.main_controller import MainController, initialize
 from .c_and_b import CAndBForm
 from .data_plotter import DataPlotter
@@ -27,6 +26,10 @@ from .sensitivity_sweep import SensitivitySweepForm
 from .system_information import SystemInformationForm
 from .timeout_dialog import TimeoutDialog
 from .ui_mainwindow import Ui_MainWindow
+
+# import sip after other PyQt modules so that we pick up the internal copy of sip
+# https://www.riverbankcomputing.com/static/Docs/PyQt5/incompatibilities.html
+import sip
 
 # import pandas as pd
 # import tabulate

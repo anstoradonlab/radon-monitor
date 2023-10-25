@@ -28,7 +28,6 @@ from ansto_radon_monitor.configuration import (Configuration,
                                                setup_logging)
 from ansto_radon_monitor.datastore import DataStore
 from ansto_radon_monitor.main_controller import MainController, initialize
-from ansto_radon_monitor.gui.main import main as guimain
 
 __author__ = "Alan Griffiths"
 __copyright__ = "Alan Griffiths"
@@ -47,7 +46,8 @@ def main(args):
 
     # these do not require a config file, so parse the command line args early
     if len(args) == 0 and os.name == "nt":
-        # start gui
+        # start gui - late import because gui libraries may not be installed
+        from ansto_radon_monitor.gui.main import main as guimain
         guimain()
         return
     cmdline_args = parse_args(args)

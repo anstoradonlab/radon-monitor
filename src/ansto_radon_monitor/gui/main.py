@@ -1,12 +1,9 @@
 import logging
 import sys
 
-import pyqtgraph
-from ansto_radon_monitor.main import setup_logging
+from ansto_radon_monitor.configuration import setup_logging
+from PyQt5 import QtCore, QtWidgets
 from .mainwindow import MainWindow
-# from PyQt5.QtWidgets import QMainWindow
-from PyQt5 import QtCore, QtWidgets, uic
-
 
 
 def main():
@@ -28,5 +25,5 @@ def main():
         sys.exit("app is already running")
 
 
-if __name__ == "__main__":
-    main()
+#if __name__ == "__main__":
+#    main()
