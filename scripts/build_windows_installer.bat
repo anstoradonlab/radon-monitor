@@ -1,4 +1,4 @@
-echo this isn't working, run the steps individually.
+echo If this isn't working, try running the steps individually.
 
 echo off
 rem
