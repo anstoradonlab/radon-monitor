@@ -1,3 +1,3 @@
 cd ..
-makensis scripts\Installer.nsi
+makensis Installer.nsi
 cd scripts
