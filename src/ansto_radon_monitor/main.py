@@ -17,6 +17,7 @@ Note: This skeleton file can be safely removed if not needed!
 
 import argparse
 import logging
+import os
 import sys
 import time
 
@@ -44,6 +45,11 @@ def main(args):
     # auxillary functions
 
     # these do not require a config file, so parse the command line args early
+    if len(args) == 0 and os.name == "nt":
+        # start gui - late import because gui libraries may not be installed
+        from ansto_radon_monitor.gui.main import main as guimain
+        guimain()
+        return
     cmdline_args = parse_args(args)
     if cmdline_args.action == "listserialports":
         import serial.tools.list_ports

@@ -1,0 +1,47 @@
+# create a windows binary using Pyinstaller, based on https://github.community/t/build-python-app-with-pyinstaller-in-github-actions/17044
+name: Pyinstaller - create windows binary
+
+on:
+  push
+
+jobs:
+  build:
+
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v3.5.2
+    - name: Set up Python 3.6
+      uses: actions/setup-python@v4.6.0
+      with:
+        python-version: 3.6
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e .[gui,pyinstaller]
+    - name: Lint with flake8
+      run: |
+        # -- do nothing at present
+        # -- TODO: add some linting!!
+        ## stop the build if there are Python syntax errors or undefined names
+        #flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        ## exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
+        #flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+    - name: Build with pyinstaller
+      run: |
+        pyinstaller --noconfirm src/RDM.spec
+    - name: Upload zip
+      uses: actions/upload-artifact@v3.1.2
+      with:
+          name: RDM_no_installer
+          path: dist/RDM
+    - name: Create installer
+      uses: joncloud/makensis-action@v4
+      with:
+          script-file: "Installer.nsi"
+    - name: Upload installer
+      uses: actions/upload-artifact@v3.1.2
+      with:
+          name: RDMSetup
+          path: dist/RDMSetup.exe
+        
