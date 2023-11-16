@@ -1,5 +1,6 @@
 import logging
 import sys
+import traceback
 import os
 
 from ansto_radon_monitor.configuration import setup_logging
@@ -7,6 +8,19 @@ from PyQt5 import QtCore, QtWidgets, QtGui
 from .mainwindow import MainWindow
 
 basedir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+
+def get_icon_path():
+    """Returns the path to the icon file, or None if it can't be found"""
+    # this is where the icon is located when the app is installed using PyInstaller
+    icon_path = os.path.join(basedir, "Icon.ico")
+    if not os.path.exists(icon_path):
+        # this is where the icon is located when the app is not installed (Dev)
+        icon_path = os.path.join(basedir, "icons", "Icon.ico")
+    
+    if not os.path.exists(icon_path):
+        icon_path = None
+    
+    return icon_path
 
 def main():
     print("Starting GUI")
@@ -28,12 +42,21 @@ def main():
 
     if lockfile.tryLock(100):
         app = QtWidgets.QApplication(sys.argv)
-        try:
-            # set the icon, but don't panic if it's not possible
-            app.setWindowIcon(QtGui.QIcon(os.path.join(basedir, 'Icon.ico')))
-        except:
-            pass
+        icon_path = get_icon_path()
+        if icon_path is not None:
+            try:
+                # set the icon, but don't panic if it's not possible
+                app.setWindowIcon(QtGui.QIcon(icon_path))
+            except Exception as ex:
+                traceback.print_exc()
         window = MainWindow()
+        if icon_path is not None:
+            try:
+                # needs to happen for the GUI window, the above setting may apply
+                # to the windows terminal window (if it's active)
+                window.setWindowIcon(QtGui.QIcon(icon_path))
+            except Exception as ex:
+                traceback.print_exc()
         window.show()
         exit_code = app.exec_()
         sys.exit(exit_code)
