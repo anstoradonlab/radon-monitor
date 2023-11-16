@@ -125,9 +125,37 @@ class Configuration:
     calbox: CalUnitConfig = field(default_factory=CalUnitConfig)
     ftp: FtpConfig = field(default_factory=FtpConfig)
 
-    def as_text(self):
-        return pprint.pformat(self)
+    
+    def as_text(self, include_sensitive=False) -> str:
+        """Generate a text version of the configuration
 
+        Args:
+            include_sensitive (bool, optional): 
+            If *true* then include potentially senstive information. Defaults to False.
+
+        Returns:
+            str: pretty-printed text version of the configuration
+        """
+        config = self
+        if not include_sensitive:
+            config = self.as_redacted_config()
+        else:
+            config = self
+        return pprint.pformat(config)
+    
+    def as_redacted_config(self):
+        """
+        Return a copy of the configuration with sensitive information removed
+        """
+        config = copy.deepcopy(self)
+        if config.ftp.server is not None:
+            config.ftp.server = "XXXXXXXX"
+        if config.ftp.user is not None:
+            config.ftp.user = "XXXXXXXX"
+        if config.ftp.passwd is not None:
+            config.ftp.passwd = "XXXXXXXX"
+        return config
+        
 
 def parse_config(raw_cfg) -> Configuration:
     # define converters/validators for the various data types we use
