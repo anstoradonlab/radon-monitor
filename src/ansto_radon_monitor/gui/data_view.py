@@ -306,6 +306,13 @@ class DataViewForm(QtWidgets.QWidget, Ui_DataViewForm):
                         (color[2] + 255) // 2,
                     )
             pen = pg.mkPen(color)
+            if do_smoothing:
+                # If there is a smoothed line to be plotted on top, then make this line
+                # thinner
+                pen.setWidth(2)
+            else:
+                # Otherwise, if we're expecting to do no smoothing, use a large line width
+                pen.setWidth(3)
             p = self.graph_widget.plot(xplt, yplt, name=label, pen=pen)
             self.plot_series.append(p)
 
