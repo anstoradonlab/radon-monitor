@@ -94,6 +94,7 @@ def load_cals(con_list):
         return itm["EventData"].startswith("Began injecting radon from calibration source into detector")
     def is_t1_func(itm):
         return (itm["EventData"] == "Left calibration state" or
+                itm["EventData"] == "Return to normal operation" or                 
                 itm["EventData"] == "Shutdown" or
                 itm["EventData"] == "Startup")
     
@@ -136,6 +137,7 @@ def load_backgrounds(con_list: typing.List[sqlite3.Connection]) -> typing.List[t
         return itm["EventData"].startswith("Began background cycle on detector")
     def is_t1_func(itm):
         return (itm["EventData"] == "Left background state" or 
+                itm["EventData"] == "Return to normal operation" or 
                 itm["EventData"] == "Shutdown" or 
                 itm["EventData"] == "Startup")
     
