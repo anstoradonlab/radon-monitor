@@ -1,5 +1,13 @@
 # Changelog
 
+## Version 10.12
+
+19 December 2023
+
+-   Use thicker lines on some plots for better visibility
+-   Filter FTP settings from configuration before dumping config to database
+-   Bugfix: improve flag calculation so that flag no longer stays stuck in state 2
+
 ## Version 10.11
 
 25 October 2023
