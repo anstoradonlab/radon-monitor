@@ -105,6 +105,7 @@ loglevel= INFO
 
 # detector_kind sets the type of radon detector.  Options are:
 #  "L1500" - standard 1500 litre detector
+#  "L700" - standard 700 litre detector
 #  "L200" - standard 200 litre detector
 #  "mock" - used for testing without a connected radon detector
 [detector1]

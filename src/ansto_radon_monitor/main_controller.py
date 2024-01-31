@@ -269,15 +269,18 @@ class MainController(object):
             
 
         # radon detector(s)
+        mock_detector_kinds = ["mock"]
+        real_detector_kinds = ["L5000", "L1500", "L700", "L200", "L100"]
+        known_detector_kinds = mock_detector_kinds + real_detector_kinds
         for ii, detector_config in enumerate(self._configuration.detectors):
             _logger.info(
                 f"Setting up thread for detector {ii+1} (type of detector: {detector_config.kind})"
             )
-            if detector_config.kind == "mock":
+            if detector_config.kind in mock_detector_kinds:
                 t = MockDataLoggerThread(
                     detector_config, datastore=self.datastore, measurement_offset=2
                 )
-            elif detector_config.kind in ["L5000", "L1500", "L750", "L200", "L100"]:
+            elif detector_config.kind in real_detector_kinds:
                 # note: poll the datalogger late (2 second measurement offset), so that it has a chance to update it's internal table
                 # before being asked for data.
                 t = DataLoggerThread(
@@ -285,7 +288,7 @@ class MainController(object):
                 )
             else:
                 raise NotImplementedError(
-                    f"Logging for detector of kind '{detector_config.kind}' is not implemented."
+                    f"Logging for detector of kind '{detector_config.kind}' is not implemented.  Known detector kinds are: {known_detector_kinds}"
                 )
             with self._thread_list_lock:
                 self._threads.append(t)
