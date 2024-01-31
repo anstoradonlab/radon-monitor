@@ -134,9 +134,12 @@ datalogger_serial=-1
 # - `CapeGrim`: two detectors, built around a Labjack connected over USB
 # - `BurkertModel1`: one or two detectors, a new system available from Jan 2023.
 #                    This is interfaced over ethernet, with a Burkert ME43 gateway
+# - `BurkertModel1-2b`: one or two detectors including two background control,
+#                    The default for new installations from 2024 onwards
+#                    This is interfaced over ethernet, with a Burkert ME43 gateway`
 # There is also a kind called "mock" which can be used for testing the software
 # but which doesn't try to connect to hardware.
-kind=generic
+kind=BurkertModel1-2b
 # Activity of the radon source (activity of radon's parent, radium-226), 
 # in decays per second (Bq)
 radon_source_activity_bq=10e3

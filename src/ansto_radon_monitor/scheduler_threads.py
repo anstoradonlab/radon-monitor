@@ -478,7 +478,8 @@ class CalibrationUnitThread(DataThread):
                     )
                 else:
                     _logger.error(
-                        f"Unknown kind of calibration unit: {self._kind}.  Known kinds are: ['none', 'generic', 'burkertModel1', 'CapeGrim', 'mock', 'mockCapeGrim].  'Mock' kinds are intended for software development only."
+                        f"Unknown kind of calibration unit: {self._kind}.  Known kinds are: ['none', 'generic', 'burkertModel1', 
+                        'burkertModel1-2b', 'CapeGrim', 'mock', 'mockCapeGrim].  'Mock' kinds are intended for software development only."
                     )
                 # no exception - set the reconnect delay to default
                 self._reconnect_delay = 30
