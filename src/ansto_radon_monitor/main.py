@@ -50,7 +50,13 @@ def main(args):
         from ansto_radon_monitor.gui.main import main as guimain
         guimain()
         return
+    # on linux, gui is started from a commandline action
     cmdline_args = parse_args(args)
+    if cmdline_args.action == "gui":
+        from ansto_radon_monitor.gui.main import main as guimain
+        guimain()
+        return
+    
     if cmdline_args.action == "listserialports":
         import serial.tools.list_ports
 

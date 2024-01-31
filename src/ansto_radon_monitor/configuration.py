@@ -236,6 +236,7 @@ def get_parser():
         "action",
         choices=[
             "run",
+            "gui",
             "query",
             "quit",
             "calibrate",
