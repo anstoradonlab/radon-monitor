@@ -43,8 +43,8 @@ jobs:
       run: |
         mv dist/RDMSetup.exe dist/RDMSetup-${{github.ref_name}}.exe
     - name: Upload installer
-      uses: actions/upload-artifact@v3.1.2
+      uses: actions/upload-artifact@v4
       with:
-          name: RDMSetup
+          name: RDMSetup-${{github.ref_name}}.exe
           path: dist/RDMSetup-${{github.ref_name}}.exe
         
