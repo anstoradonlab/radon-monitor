@@ -1,5 +1,16 @@
 # Changelog
 
+## Version 10.13
+
+18 March 2024
+
+- Add "gui" command line option on Linux.  (GUI is the default on Windows)
+- Display pressure on main display only to one decimal place
+- Add a configuration option for 700l detector: 
+
+        [detector1]
+        kind=L700
+
 ## Version 10.12
 
 19 December 2023
