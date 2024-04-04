@@ -1,4 +1,5 @@
 #%%
+import copy
 import csv
 import datetime
 import logging
@@ -19,6 +20,9 @@ from typing import Union, Dict, Any
 
 from .flag_calc import FlagCalculator
 from .data_util import *
+from .openrvdas_udp.udp_writer import UDPWriter
+from .configuration import Configuration
+import json
 
 _logger = logging.getLogger(__name__)
 
@@ -433,12 +437,17 @@ class DataStore(object):
     #  (self.data_file, table_name, detector_name)
     _table_update_time: Dict[str, Any] = {}
 
-    def __init__(self, config, readonly=False):
+    def __init__(self, config: Configuration, readonly=False):
         self.data_file = str(config.data_file)
         self._config = config
         self._connection_per_thread = {}
         self._data_lock = threading.RLock()
         self._readonly = readonly
+        if config.udp_broadcast_port is not None:
+            self._udp_comm = UDPWriter(destination=config.udp_broadcast_destination,
+                                       port=config.udp_broadcast_port)
+        else:
+            self._udp_comm = None
 
         # this forces an immediate connection to the database
         # so that any errors will occur now (rather than once
@@ -670,6 +679,29 @@ class DataStore(object):
                 "Programming error (?) - add_records called with zero-length data"
             )
             return
+
+        # Send UDP broadcast, only for "Results" table
+        try:
+            if self._udp_comm is not None and table_name == "Results":
+                rec = copy.deepcopy(data[-1])
+                # add approx radon calculation
+                rec = self._calculate_approx_radon([rec])[0]
+                # strip _Tot and _Avg suffix from record names
+                newrec = {}
+                for k,v in rec.items():
+                    if k.endswith("_Tot"):
+                        k = k[:-4]
+                    elif k.endswith("_Avg"):
+                        k = k[:-4]
+                    newrec[k] = v
+                rec = newrec
+                json_data = json.dumps(rec, default=str)
+                _logger.info(f"UDP broadcast to {self._udp_comm.destination}:{self._udp_comm.port} {json_data}")
+                self._udp_comm.write(json_data)
+        except Exception as ex:
+            msg = traceback.format_exc()
+            _logger.error(f"Unable to send UDP broadcast: {msg}")
+            
 
         cur = self.con.cursor()
         column_names = list(data[0].keys())

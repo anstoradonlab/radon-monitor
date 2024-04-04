@@ -5,9 +5,7 @@ import socket
 import struct
 import sys
 
-from os.path import dirname, realpath
-sys.path.append(dirname(dirname(dirname(realpath(__file__)))))
-from logger.readers.reader import Reader  # noqa: E402
+from .reader import Reader  # noqa: E402
 
 # The UDP header's `length` field sets a theoretical limit of 65,535 bytes
 # (8-byte header + 65,527 bytes of data) for a UDP datagram.  Technically, IPV4

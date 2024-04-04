@@ -5,7 +5,7 @@ import sys
 
 from os.path import dirname, realpath
 sys.path.append(dirname(dirname(dirname(realpath(__file__)))))
-from logger.utils import formats  # noqa: E402
+from . import formats  # noqa: E402
 
 
 class Writer:

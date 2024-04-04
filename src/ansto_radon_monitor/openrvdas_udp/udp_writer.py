@@ -6,10 +6,7 @@ import socket
 import struct
 import sys
 
-from os.path import dirname, realpath
-sys.path.append(dirname(dirname(dirname(realpath(__file__)))))
-
-from logger.writers.writer import Writer
+from .writer import Writer
 
 # So that we can write the user's record no matter how silly big it is, we
 # autodetect the system's maximum datagram size and write() fragments the
