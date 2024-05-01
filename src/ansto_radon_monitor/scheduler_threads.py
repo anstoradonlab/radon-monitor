@@ -1518,8 +1518,13 @@ class DataLoggerThread(DataThread):
         fname = str(progstat["ProgName"], "utf-8")
         data_file = str(self._datalogger.getfile(fname), "utf-8")
         self._datastore.add_log_message(
+            "LoggerFirmwareName",
+            fname,
+            detector_name=self.detectorName,
+        )
+        self._datastore.add_log_message(
             "LoggerFirmware",
-            f"Detector: {self.detectorName}, \n{data_file}",
+            data_file,
             detector_name=self.detectorName,
         )
 
