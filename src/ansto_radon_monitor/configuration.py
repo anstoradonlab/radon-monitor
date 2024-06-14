@@ -124,8 +124,9 @@ class Configuration:
     detectors: typing.List[DetectorConfig] = field(default_factory=list)
     calbox: CalUnitConfig = field(default_factory=CalUnitConfig)
     ftp: FtpConfig = field(default_factory=FtpConfig)
-    udp_broadcast_destination: typing.Optional[str] = None
-    udp_broadcast_port: typing.Optional[int] = None
+    udp_destination: typing.Optional[str] = None
+    udp_port: int = 51520
+    udp_multicast_interface: typing.Optional[str] = None
 
     
     def as_text(self, include_sensitive=False) -> str:
