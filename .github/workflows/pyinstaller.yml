@@ -2,7 +2,10 @@
 name: Pyinstaller/NSIS - create windows binary
 
 on:
-  push
+  push:
+    tags:        
+      - '**'    # Push events to every tag including hierarchical tags like v1.0/beta
+
 
 jobs:
   build:
@@ -31,7 +34,7 @@ jobs:
       run: |
         pyinstaller --noconfirm src/RDM.spec
     - name: Upload zip
-      uses: actions/upload-artifact@v3.1.2
+      uses: actions/upload-artifact@v4
       with:
           name: RDM_no_installer
           path: dist/RDM
