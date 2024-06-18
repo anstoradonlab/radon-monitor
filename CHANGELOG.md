@@ -1,5 +1,24 @@
 # Changelog
 
+## Version 10.14
+
+ - Add an experimental option to send incoming data out across the network.
+   This is a feature which is intended for use with [OpenRVDAS](https://openrvdas.org/), although it could be 
+   used in other situations too.  30-minute summaries from the "Results" table are sent
+   as UDP packets, formatted as JSON.  An example configuration, which sends data
+   to multicast group 224.0.36.0, looks like: 
+
+        [data]
+        udp_destination=224.0.36.0
+        udp_port=51520
+        udp_multicast_interface=<host name or ip address of the computer running RDM>
+
+    Internally, RDM uses a vendored copy of [UDPWriter](https://github.com/OceanDataTools/openrvdas/blob/master/logger/writers/udp_writer.py) from OpenRVDAS.  It is [documented here](https://htmlpreview.github.io/?https://raw.githubusercontent.com/oceandatatools/openrvdas/master/docs/html/logger/writers/udp_writer.html). 
+
+    If `udp_destination` is not set in the configuration file, this feature is disabled.
+
+- Avoid crashing the GUI when the output data directory can't be created during startup
+
 ## Version 10.13
 
 18 March 2024
