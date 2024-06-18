@@ -349,6 +349,10 @@ class CalibrationUnitThread(DataThread):
         self._data = None
         self._status_cache = None
 
+        # keep a record of when the last "scheduler may be in an inconsistent state" message was
+        # reported so it can be rate-limited
+        self._last_scheduler_warning_time = 0
+
         # Labjack API needs None for serialNumber if we are to ignore it
         if serialNumber == -1:
             serialNumber = None
@@ -986,9 +990,12 @@ class CalibrationUnitThread(DataThread):
         n = len(scheduled_cal_bg_tasks)
         expected_num_tasks = self._num_detectors * 2
         if not n == expected_num_tasks:
-            _logger.warning(
-                f"Unexpected number of scheduled background & calibration tasks ({n}, expected {expected_num_tasks}) - the scheduler may be in an inconsistent state"
-            )
+            if time.time() - self._last_scheduler_warning_time > 3600:
+                # warn, at most, once per hour
+                _logger.warning(
+                    f"Unexpected number of scheduled background & calibration tasks ({n}, expected {expected_num_tasks}) - the scheduler may be in an inconsistent state"
+                )
+                self._last_scheduler_warning_time = time.time()
         return n >= expected_num_tasks
 
     @property
