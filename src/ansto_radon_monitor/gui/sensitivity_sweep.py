@@ -117,8 +117,17 @@ class SensitivitySweepForm(QtWidgets.QWidget, Ui_SensitivitySweepForm):
 
         hv_ok = True
         for k in hv_cols:
-            if abs(row[k] - target) > tolerance:
+            # allow some of the HV columns to be None
+            if row[k] is not None and abs(row[k] - target) > tolerance:
                 hv_ok = False
+
+        all_none = False
+        for k in hv_cols:
+            if row[k] is not None:
+                all_none = False
+        if all_none:
+            # but do not let *all* of the HV columns to be None
+            hv_ok = False
 
         if not hv_ok:
             self.instructionLabel.setText(
