@@ -468,7 +468,11 @@ class DataStore(object):
             # ensure directory exists
             db_directory = os.path.dirname(self.data_file)
             if not os.path.exists(db_directory) and not self._readonly:
-                os.makedirs(db_directory)
+                try:
+                    os.makedirs(db_directory)
+                except Exception as ex:
+                    _logger.error(f"Unable to create directory {db_directory}")
+                    raise ex
             con = self.connect_to_file(self.data_file, timeout_seconds, self._readonly)
             
             self._connection_per_thread[tid] = con

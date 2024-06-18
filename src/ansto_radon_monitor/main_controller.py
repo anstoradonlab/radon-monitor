@@ -63,7 +63,7 @@ def initialize(configuration: Configuration, mode: str = "thread"):
     configuration : dict-like
         program options
     mode : str, optional
-        'daemon', 'thread', 'connect', or 'foreground', by default 'daemon'
+        'daemon', 'thread', 'connect', or 'foreground', by default 'thread'
 
 
     Returns a main controller proxy (or perhaps a main controller itself, if running threaded)
@@ -233,7 +233,14 @@ class MonitorThread(threading.Thread):
 class MainController(object):
     def __init__(self, configuration: Configuration):
         self._thread_list_lock = threading.RLock()
-        self.datastore = DataStore(configuration)
+        try:
+            self.datastore = DataStore(configuration)
+        except Exception as ex:
+            _logger.critical(
+                f"Unable to open database because of error: {ex}, {traceback.format_exc()}"
+            )
+            raise ex
+
         # a flag used to signal that the controller is shutting down
         self._shutting_down = False
         self._configuration = configuration
@@ -250,6 +257,7 @@ class MainController(object):
                 f"Unable to start logging because of error: {ex}, {traceback.format_exc()}"
             )
             self.shutdown()
+            raise ex
 
     def _start_threads(self):
         with self._thread_list_lock:

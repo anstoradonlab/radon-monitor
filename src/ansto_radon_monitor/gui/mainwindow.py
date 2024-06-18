@@ -7,6 +7,7 @@ import os
 import pprint
 import sys
 import threading
+import traceback
 import time
 from typing import Dict, List, Optional, Union
 
@@ -479,9 +480,17 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
         self.config = config
 
-        setup_logging(config.loglevel, config.logfile)
+        try:
+            setup_logging(config.loglevel, config.logfile)
+        except Exception as ex:
+            _logger.critical(f"Unable to initialise logging to {config.logfile} because of {ex}: {traceback.format_exc()}")
+            return
 
-        self.instrument_controller = initialize(config, mode="thread")
+        try:
+            self.instrument_controller = initialize(config, mode="thread")
+        except Exception as ex:
+            _logger.critical("Aborting startup")
+            return
 
         # sync the gui's Maintenance mode state with the backend
         mm = self.instrument_controller.maintenance_mode

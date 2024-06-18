@@ -10,6 +10,7 @@ import datetime
 import logging
 from logging import StreamHandler
 from logging.handlers import RotatingFileHandler
+import os
 import pathlib
 import pprint
 import sys
@@ -337,8 +338,8 @@ def config_from_commandline(
     # validate configuration
     # (doing this early seems helpful, but may not be ideal in some respects.
     # Consider moving it later, e.g. when DataStore is initialized)
-    # if not config.data_dir.exists():
-    #    _logger.error(f'Data storage directory "{config.data_dir}" does not exist.')
+    if not config.data_dir.exists():
+        _logger.error(f'Data storage directory "{config.data_dir}" does not exist.')
 
     # check log file is writable
     if config.logfile is None:
@@ -358,6 +359,7 @@ def config_from_commandline(
 
 
 def config_from_yamlfile(filename) -> Configuration:
+    filename = os.path.normpath(filename)
     _logger.info(f"Loading configuration from: {filename}")
     with open(filename, "rt") as fd:
         raw_cfg = yaml.safe_load(fd.read())
@@ -403,6 +405,7 @@ def raw_config_from_inifile(filename) -> typing.Dict:
     Dict
         dict of configuration
     """
+    filename = os.path.normpath(filename)
     _logger.info(f"Loading configuration from: {filename}")
     configp = configparser.ConfigParser()
     configp.read(filename)
