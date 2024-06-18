@@ -227,6 +227,8 @@ p, li { white-space: pre-wrap; }
     <addaction name="actionViewSystemInformation"/>
     <addaction name="actionViewSensitivitySweep"/>
     <addaction name="separator"/>
+    <addaction name="actionScheduled_Tasks"/>
+    <addaction name="separator"/>
     <addaction name="actionDarkMode"/>
    </widget>
    <addaction name="menuFile"/>
@@ -285,6 +287,11 @@ p, li { white-space: pre-wrap; }
   <action name="actionSync_Output">
    <property name="text">
     <string>Sync Output Files</string>
+   </property>
+  </action>
+  <action name="actionScheduled_Tasks">
+   <property name="text">
+    <string>Scheduled Tasks</string>
    </property>
   </action>
  </widget>

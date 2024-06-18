@@ -265,6 +265,31 @@ class DataThread(threading.Thread):
         return ret
 
     @property
+    def pydict_task_queue(self):
+        """Task queue, as a list of dictionaries and using Python objects"""
+        tasks = []
+        with self._lock:
+            for task in self._scheduler.queue:
+                itm = {}
+                now = time.time()
+                itm["Controlling thread"] = self.name
+                itm["Task start time (UTC)"] = datetime.datetime.fromtimestamp(task.time, tz=datetime.timezone.utc)
+                itm["Task start time (Local)"] =  datetime.datetime.fromtimestamp(task.time)
+                itm["Time remaining"] = datetime.timedelta(seconds = task.time - now)
+                itm["Function"] = task.action.__name__
+                if itm["Function"] == "set_inject_state" or itm["Function"] == "set_background_state":
+                    # note which radon detector this applies to
+                    itm["Radon detector"] = task.argument[0]+1
+                else:
+                    itm["Radon detector"] = None
+                try:
+                    itm["Description"] = task.action.description
+                except AttributeError:
+                    itm["Description"] = ""
+                tasks.append(itm)
+        return tasks
+            
+    @property
     def seconds_until_next_measurement(self):
         now = time.time()
         delay = next_interval(now, self.measurement_interval, self.measurement_offset)
@@ -581,6 +606,7 @@ class CalibrationUnitThread(DataThread):
                 "CalibrationEventSummary", json_log_data, detector_name=detector_name
             )
 
+    @task_description("Calibration unit: exit background mode")
     def set_nonbackground_state(self, log_data=None):
         self._datastore.add_log_message("CalibrationEvent", f"Left background state")
         self._run_or_reset(self._device.reset_background, "leave background state")

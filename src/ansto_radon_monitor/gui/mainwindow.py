@@ -27,6 +27,7 @@ from .sensitivity_sweep import SensitivitySweepForm
 from .system_information import SystemInformationForm
 from .timeout_dialog import TimeoutDialog
 from .ui_mainwindow import Ui_MainWindow
+from .task_status_dialog import TaskStatusDialog
 
 # import sip after other PyQt modules so that we pick up the internal copy of sip
 # https://www.riverbankcomputing.com/static/Docs/PyQt5/incompatibilities.html
@@ -139,6 +140,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.instrument_controller: Optional[MainController] = None
         self.config: Optional[Configuration] = None
         self.configured_tables: List[str] = []
+        self.task_status_dialog = None
 
         # multi-panel plot window
         self.pgwin: Union[pg.GraphicsLayoutWidget, None] = None
@@ -292,6 +294,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.actionShow_Data.triggered.connect(self.show_data)
         self.actionSync_Output.triggered.connect(self.sync_output)
         self.actionViewCalibration.triggered.connect(self.view_calibration_dialog)
+        self.actionScheduled_Tasks.triggered.connect(self.view_taskstatus_dialog)
         self.actionDarkMode.triggered.connect(self.set_dark_theme)
         self.actionMaintence_Mode.triggered.connect(self.set_maintenance_mode)
         self.exitMaintenancePushButton.clicked.connect(self.set_maintenance_mode)
@@ -339,6 +342,14 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         if self.cal_dialog is not None:
             self.cal_dialog.close()
         self.cal_dialog = None
+    
+    def create_taskstatus_dialog(self):
+        self.task_status_dialog = TaskStatusDialog(parent=self)
+
+    def view_taskstatus_dialog(self):
+        if self.task_status_dialog is None:
+            self.create_taskstatus_dialog()
+        self.task_status_dialog.show()
 
     def view_system_information_dialog(self):
         if self.sysinfo_dialog is not None:
@@ -538,6 +549,13 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         num_detectors = len(self.config.detectors)
         hud_height = num_detectors * 160
         self.hudTextBrowser.setMinimumHeight(hud_height)
+
+        # tasks, list of dictionary
+        task_lod = ic_status["_pending tasks"]
+        if self.task_status_dialog is not None and len(task_lod) > 0:
+            task_headers = [list(task_lod[0].keys())]
+            task_data = [list(itm.values()) for itm in task_lod]
+            self.task_status_dialog.update_data(task_headers + task_data)
 
         if not set(self.configured_tables) == set(tables):
             # build data view UI

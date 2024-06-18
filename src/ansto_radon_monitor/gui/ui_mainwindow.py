@@ -145,6 +145,8 @@ class Ui_MainWindow(object):
         self.actionMaintence_Mode.setObjectName("actionMaintence_Mode")
         self.actionSync_Output = QtWidgets.QAction(MainWindow)
         self.actionSync_Output.setObjectName("actionSync_Output")
+        self.actionScheduled_Tasks = QtWidgets.QAction(MainWindow)
+        self.actionScheduled_Tasks.setObjectName("actionScheduled_Tasks")
         self.menuFile.addAction(self.actionLoad_Configuration)
         self.menuFile.addAction(self.actionSync_Output)
         self.menuFile.addAction(self.actionShow_Data)
@@ -155,6 +157,8 @@ class Ui_MainWindow(object):
         self.menuView.addAction(self.actionViewCalibration)
         self.menuView.addAction(self.actionViewSystemInformation)
         self.menuView.addAction(self.actionViewSensitivitySweep)
+        self.menuView.addSeparator()
+        self.menuView.addAction(self.actionScheduled_Tasks)
         self.menuView.addSeparator()
         self.menuView.addAction(self.actionDarkMode)
         self.menubar.addAction(self.menuFile.menuAction())
@@ -189,4 +193,5 @@ class Ui_MainWindow(object):
         self.actionViewSensitivitySweep.setText(_translate("MainWindow", "Sensitivity Sweep"))
         self.actionMaintence_Mode.setText(_translate("MainWindow", "Maintence Mode"))
         self.actionSync_Output.setText(_translate("MainWindow", "Sync Output Files"))
+        self.actionScheduled_Tasks.setText(_translate("MainWindow", "Scheduled Tasks"))
 

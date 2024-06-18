@@ -450,6 +450,8 @@ class MainController(object):
 
         status["pending tasks"] = self.get_job_queue()
 
+        status["_pending tasks"] = self.get_job_queue(pyobjects=True)
+
         # summarise the status information into a single line
         # summary is something like:
         #  TEST_002M  link: connected, serial: COM1  TEST_050M  link: connected, serial: COM2
@@ -473,15 +475,26 @@ class MainController(object):
         status["summary"] = " | ".join(summary_list)
         return status
 
-    def get_job_queue(self):
+    def get_job_queue(self, pyobjects=False):
         """
         return a list of pending jobs
         """
         jobq = []
-        for t in self._threads:
-            # only report on the calibration unit & data minder
-            if t.name == "CalibrationUnitThread" or t.name == "DataMinderThread":
-                jobq.append(t.task_queue)
+        if pyobjects:
+            # return dict of python objects, for downstream programs
+            for t in self._threads:
+                try:
+                    jobq.extend(t.pydict_task_queue)
+                except AttributeError:
+                    # some threads (e.g. MonitorThread) don't have a task queue
+                    pass
+
+        else:
+            # return string info, for display to users
+            for t in self._threads:
+                # only report on the calibration unit & data minder
+                if t.name == "CalibrationUnitThread" or t.name == "DataMinderThread":
+                    jobq.append(t.task_queue)
 
         return jobq
 
