@@ -28,6 +28,7 @@ from .system_information import SystemInformationForm
 from .timeout_dialog import TimeoutDialog
 from .ui_mainwindow import Ui_MainWindow
 from .task_status_dialog import TaskStatusDialog
+from .calibration_history_dialog import CalibrationHistoryDialog
 
 # import sip after other PyQt modules so that we pick up the internal copy of sip
 # https://www.riverbankcomputing.com/static/Docs/PyQt5/incompatibilities.html
@@ -180,6 +181,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.redraw_timer.start()
 
         self.cal_dialog = None
+        self.calhistory_dialog = None
         self.sysinfo_dialog = None
         self.sensitivity_sweep_dialog = None
 
@@ -205,6 +207,9 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
         # create dialog (but don't show it)
         self.create_calibration_dialog()
+
+        # temporary, for testing
+        self.view_calibrationhistory_dialog()
 
     def setup_statusbar(self):
         sb = self.statusbar
@@ -342,6 +347,19 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         if self.cal_dialog is not None:
             self.cal_dialog.close()
         self.cal_dialog = None
+    
+    def create_calibrationhistory_dialog(self):
+        self.calhistory_dialog = CalibrationHistoryDialog(parent=self)
+    
+    def view_calibrationhistory_dialog(self):
+        if self.calhistory_dialog is None:
+            self.create_calibrationhistory_dialog()
+        self.calhistory_dialog.show()
+
+    def close_calibrationhistory_dialog(self):
+        if self.calhistory_dialog is not None:
+            self.calhistory_dialog.close()
+        self.calhistory_dialog = None
     
     def create_taskstatus_dialog(self):
         self.task_status_dialog = TaskStatusDialog(parent=self)

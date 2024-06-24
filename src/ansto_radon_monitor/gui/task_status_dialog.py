@@ -121,6 +121,9 @@ class TaskStatusDialog(QtWidgets.QDialog):
         closeButton.clicked.connect(self.close)
         layout.addWidget(closeButton)
 
+        self.setSizeGripEnabled(True)
+        self.resize(800,400)
+
     def update_data(self, data):
         self.table.update_data(data)    
 
