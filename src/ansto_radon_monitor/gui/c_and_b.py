@@ -68,13 +68,13 @@ class CAndBForm(QtWidgets.QWidget, Ui_CAndBForm):
         For each detector in the configuration, create a cal/bg
         start time widget
         """
+        self._start_time_widgets = []
         config = self.mainwindow.config
         if config is None:
             return
         container = self.cal_bg_start_times_layout
         while len(container) > 0:
             container.removeWidget(container.children[0])
-        self._start_time_widgets = []
         for ii, detector_config in enumerate(config.detectors):
             widget = CalBgStartWidget(
                 sequence_number=ii + 1, detector_name=detector_config.name
@@ -409,20 +409,22 @@ class CAndBForm(QtWidgets.QWidget, Ui_CAndBForm):
         if type(bg_times) == type([]):
             for ii, t in enumerate(bg_times):
                 try:
-                    self._start_time_widgets[ii].bg_start_time = t
+                    if ii < len(self._start_time_widgets):
+                        self._start_time_widgets[ii].bg_start_time = t
                 except Exception as e:
                     _logger.error(
-                        f"Unable to read background start time from QSettings.  Detector {ii+1}, bg_times: {bg_times}"
+                        f"Unable to read background start time from QSettings due to {e}.  Detector {ii+1}, bg_times: {bg_times}"
                     )
         # repeat for cal times
         cal_times = qs.value("t0_cal")
         if type(cal_times) == type([]):
             for ii, t in enumerate(cal_times):
                 try:
-                    self._start_time_widgets[ii].cal_start_time = t
+                    if ii < len(self._start_time_widgets):
+                        self._start_time_widgets[ii].cal_start_time = t
                 except Exception as e:
                     _logger.error(
-                        f"Unable to read background start time from QSettings.  Detector {ii+1}, bg_times: {bg_times}"
+                        f"Unable to read background start time from QSettings due to {e}.  Detector {ii+1}, bg_times: {bg_times}"
                     )
         schedule_state = qs.value("schedule_enabled")
         if schedule_state is not None:
