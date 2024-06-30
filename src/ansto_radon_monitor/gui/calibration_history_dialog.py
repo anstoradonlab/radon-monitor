@@ -44,13 +44,13 @@ class CalibrationHistoryWidget(QtWidgets.QWidget):
 
     def init_graph(self):
         """Initial construction of the plots"""
-        self._p1 = self._win.addPlot(
-            row=0, col=0,
-        )
+        self._p1 = self._win.addPlot(row=0, col=0)
         self._p1.setLabel("left", "LLD", units="counts per 30-min")
-        self._p2.setLabel("bottom", "Time since start of event", units="hours")
+
         self._p2 = self._win.addPlot(row=1, col=0, axisItems={"bottom": pg.DateAxisItem(utcOffset=0)})
+        self._p2.setLabel("bottom", "Time since start of event", units="hours")
         self._p2.setLabel("left", "LLD", units="cps")
+
         self._s1 = []
         self._s2 = []
 
