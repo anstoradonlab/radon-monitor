@@ -11,5 +11,6 @@ pyinstaller --name RDM --noupx --log-level INFO --noconfirm ^
    --icon icons\Icon.ico ^
    --version-file file_version_info.txt ^
    --add-binary resources\windows\ljackuw.dll;. ^
+   --add-binary icons\Icon.ico;. ^
    .\src\ansto_radon_monitor\main.py
 cd scripts

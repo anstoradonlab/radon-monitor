@@ -4,7 +4,7 @@
 a = Analysis(
     ['ansto_radon_monitor\\main.py'],
     pathex=[],
-    binaries=[('resources\\windows\\ljackuw.dll', '.')],
+    binaries=[('resources\\windows\\ljackuw.dll', '.'), ('icons\\Icon.ico', '.')],
     datas=[],
     hiddenimports=[],
     hookspath=[],
