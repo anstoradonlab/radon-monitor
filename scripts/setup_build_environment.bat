@@ -3,7 +3,7 @@ cd ..
 del /f /Q /S installervenv
 
 Rem create a minimal environment containing just Python
-call conda create -y --prefix ./installervenv python=3.6 pip nsis=3
+call conda create -y --prefix ./installervenv python=3.11 pip nsis=3
 
 Rem Activate the packaging environment
 call conda activate ./installervenv
