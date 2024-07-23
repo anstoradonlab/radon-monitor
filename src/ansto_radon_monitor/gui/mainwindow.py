@@ -208,8 +208,8 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         # create dialog (but don't show it)
         self.create_calibration_dialog()
 
-        # temporary, for testing
-        self.view_calibrationhistory_dialog()
+        ## temporary, for testing
+        #self.view_calibrationhistory_dialog()
 
     def setup_statusbar(self):
         sb = self.statusbar
