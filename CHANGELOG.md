@@ -1,5 +1,11 @@
 # Changelog
 
+## Version 10.15
+ - Packaging on Windows now uses Python v3.11 and PyQt v5.15
+ - Added a "scheduled tasks" view which displays RDM's internal state.  This is useful for debugging or for displaying the time until the next calibration.
+ - Prevent the 'inconsistent state' message from appearing more than once per hour
+ - Improve missing data handling in sensitivity sweep
+
 ## Version 10.14
 
  - Add an experimental option to send incoming data out across the network.
