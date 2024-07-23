@@ -333,8 +333,8 @@ class DataViewForm(QtWidgets.QWidget, Ui_DataViewForm):
                     conv = np.ones(conv_width + 1, dtype=float)
                     conv /= conv.sum()
                     y_s = np.convolve(conv, np.array(y).astype(float), mode="same")
-                    y_s[: conv_width // 2] = np.NaN
-                    y_s[-conv_width // 2 :] = np.NaN
+                    y_s[: conv_width // 2] = np.nan
+                    y_s[-conv_width // 2 :] = np.nan
                     yplt = np.empty(len(y) * 2)
                     yplt[::2] = y_s
                     yplt[1::2] = y_s

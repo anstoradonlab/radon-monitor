@@ -84,7 +84,7 @@ class SensitivitySweepForm(QtWidgets.QWidget, Ui_SensitivitySweepForm):
         if not row["DetectorName"] == self._detector_name:
             return
         row = copy.deepcopy(row)
-        row["HV_nominal"] = np.NaN
+        row["HV_nominal"] = np.nan
         noiseOk = True
         if self.noiseCheckBox.isEnabled():
             # Check that there isn't any noise on this measurement
