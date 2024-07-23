@@ -440,5 +440,20 @@ class CAndBForm(QtWidgets.QWidget, Ui_CAndBForm):
         super(CAndBForm, self).hideEvent(event)
 
     def __del__(self):
+    
+        # There appears to be a race between the Python object being 
+        # destroyed and the underlying C++ QTimer object
+        try:
+            tmp = self.redraw_timer.parent()
+            del tmp
+        except RuntimeError:
+            # the C++ redraw timer object has already been deleted,
+            # so there's nothing to do.
+            # print("*** Cleanup doing nothing")
+            return
+
+        # print("*** Cleanup running disconnect")
+        # The C++ redraw timer exists, so disconnect from it to prevent
+        # the callback trying to execute a non-existant function
         self.redraw_timer.disconnect()
         self.redraw_timer.deleteLater()
