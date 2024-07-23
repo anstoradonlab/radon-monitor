@@ -11,5 +11,8 @@ call conda activate ./installervenv
 Rem Install the local copy of this package and dependencies
 python -m pip install .[gui,pyinstaller]
 
+Rem Copy the labjack dll into the environment where it can be discovered by ctypes
+copy src\resources\windows\ljackuw.dll installervenv
+
 cd scripts
 
