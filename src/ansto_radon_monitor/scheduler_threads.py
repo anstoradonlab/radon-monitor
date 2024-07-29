@@ -1185,6 +1185,9 @@ class DataLoggerThread(DataThread):
             bytesize=serial.EIGHTBITS,
             parity=serial.PARITY_NONE,
             stopbits=1,
+            # exclusive locking on posix requires pyserial >= 3.3 (released March 8 2017)
+            # this flag does nothing on Windows (which is always in exclusive mode)
+            exclusive=True,
         )
         ser.port = detector_config.serial_port
         self._datalogger = CR1000(ser)
