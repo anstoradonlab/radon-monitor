@@ -14,6 +14,12 @@ from ansto_radon_monitor.configuration import (config_from_commandline,
                                                parse_args, parse_config)
 from ansto_radon_monitor.main_controller import MainController, initialize
 
+IN_GITHUB_ACTIONS = os.getenv("GITHUB_ACTIONS") == "true"
+
+#@pytest.mark.skipif(IN_GITHUB_ACTIONS, reason="Test doesn't work in Github Actions.")
+#def test_example():
+#   assert 1 == 1
+
 
 config_str = (
 """
