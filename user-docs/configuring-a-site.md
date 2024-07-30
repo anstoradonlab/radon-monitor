@@ -234,10 +234,20 @@ DB Browser for SQLite:
 https://download.sqlitebrowser.org/DB.Browser.for.SQLite-3.12.2-win64.msi
 
 
-### A resonable text editor
+### A reasonable text editor
 
 Notepad++:
 https://notepad-plus-plus.org/downloads/
+
+### Bürkert Communicator (optional)
+
+For troubleshooting and low-level control of the Bürkert calibration system.  This also requires an installation of a particular version of Microsoft .NET Desktop Runtime.  The installer will try to download and install the correct version during setup, but if you don't have network access you will need to install .NET Desktop Runtime first.
+
+Bürkert Communicator: https://www.burkert.com.au/en/type/8920
+Microsoft dotnet: https://dotnet.microsoft.com/en-us/download/dotnet
+
+Compatible versions: Bürkert Communicator 7.0.4
+Dot Net: .NET Desktop Runtime 7.0.0 ([direct link](https://dotnet.microsoft.com/en-us/download/dotnet/thank-you/runtime-desktop-7.0.0-windows-x64-installer))
 
 ### Some kind of period backup solution (optional)
 
