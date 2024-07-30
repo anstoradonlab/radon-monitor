@@ -273,9 +273,10 @@ class DataThread(threading.Thread):
                 itm = {}
                 now = time.time()
                 itm["Controlling thread"] = self.name
-                itm["Task start time (UTC)"] = datetime.datetime.fromtimestamp(task.time, tz=datetime.timezone.utc)
-                itm["Task start time (Local)"] =  datetime.datetime.fromtimestamp(task.time)
-                itm["Time remaining"] = datetime.timedelta(seconds = task.time - now)
+                TFMT = "%Y-%m-%d %H:%M:%S"
+                itm["Task start time (UTC)"] = (datetime.datetime.fromtimestamp(task.time, tz=datetime.timezone.utc)).strftime(TFMT)
+                itm["Task start time (Local)"] =  (datetime.datetime.fromtimestamp(task.time)).strftime(TFMT)
+                itm["Time remaining"] = str(datetime.timedelta(seconds = round(task.time - now)))
                 itm["Function"] = task.action.__name__
                 if itm["Function"] == "set_inject_state" or itm["Function"] == "set_background_state":
                     # note which radon detector this applies to
