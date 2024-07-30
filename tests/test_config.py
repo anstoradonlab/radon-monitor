@@ -49,7 +49,7 @@ def test_load_config_from_commandline():
 
     args = ["run"]
     config, cmdline_args = config_from_commandline(args, raw_cfg=get_raw_cfg())
-    assert config.loglevel != logging.ERROR
+    assert config.loglevel == logging.ERROR
 
 
 def test_fg_flag():

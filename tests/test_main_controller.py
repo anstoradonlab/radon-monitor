@@ -1,10 +1,6 @@
 # -*- coding: utf-8 -*-
 
-# WARNING: this test needs the logger and labjack to be plugged in!
-
-import logging
 import pprint
-import tempfile
 import time
 import sys
 import os
@@ -12,26 +8,19 @@ import pathlib
 import subprocess
 
 import pytest
-import yaml
 import ansto_radon_monitor
 from ansto_radon_monitor.configuration import (config_from_commandline,
                                                raw_config_from_inifile,
                                                parse_args, parse_config)
 from ansto_radon_monitor.main_controller import MainController, initialize
 
-__author__ = "Alan Griffiths"
-__copyright__ = "Alan Griffiths"
-__license__ = "mit"
-
-
-import json
 
 config_str = (
 """
 [data]
 data_dir=./data-one-mock-detector
 data_file=./data-one-mock-detector/radon.db
-loglevel=INFO
+loglevel=DEBUG
 legacy_file_write_approx_radon=False
 
 [detector1]
