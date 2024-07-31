@@ -77,7 +77,9 @@ FunctionEnd
 
 !define UNINST_KEY \
   "Software\Microsoft\Windows\CurrentVersion\Uninstall\RDM"
+
 Section
+  Call UninstallPrevious
   SetOutPath "$InstDir"
   File /r "dist\RDM\*"
   WriteRegStr SHCTX "Software\RDM" "" $InstDir
@@ -110,4 +112,25 @@ SectionEnd
 
 Function LaunchAsNonAdmin
   Exec '"$WINDIR\explorer.exe" "$InstDir\RDM.exe"'
+FunctionEnd
+
+; the idea for this is from 
+; https://stackoverflow.com/questions/719631/how-do-i-require-user-to-uninstall-previous-version-with-nsis
+
+Function UninstallPrevious
+
+    ; Check for uninstaller.
+    ReadRegStr $R0 SHCTX "Software\RDM" ""
+
+    ${If} $R0 == ""        
+        Goto Done
+    ${EndIf}
+
+    DetailPrint "Removing previous installation."    
+
+    ; Run the uninstaller silently.
+    ExecWait '"$R0\Uninstall.exe" /S _?=$R0'
+
+    Done:
+
 FunctionEnd
