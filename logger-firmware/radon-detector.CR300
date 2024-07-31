@@ -1,0 +1,192 @@
+'Radon detector logger
+'
+'Log the output of an ANSTO dual flow loop, two filter radon detector
+'using a CR310 or CR300 datalogger
+'
+'Program author: Alan Griffiths
+'
+'Changes
+' Alan, July 2014: First version, based on CR800 code dating back to '07
+'                  with stuff related to calibrations removed.
+'
+'CR Basic Programming Manual: https://help.campbellsci.com/crbasic/cr6/
+
+'Calibration factor for 2L cyclic volume flow meter
+Const flowcal = 0.0667
+'Calibration factors for vent captor terminating into 120 ohm
+'resistor (converts from mV input to m/s)
+Const VC_SLOPE = 0.010417
+Const VC_OFFSET = -5
+
+'SDI-12: raw sensor data
+Public BaroVUE(3)
+Public TRHData(2)
+
+'SDI-12: SDI-12 sensor data, converted to usable variables
+'  .. BaroVUE SDI-12 Barometer, with ancillary temperature and quality variables
+Alias BaroVUE(1)=Pres
+Alias BaroVUE(2)=BV_Temp
+Alias BaroVUE(3)=BV_Qual
+' .. HygroVUE T/RH sensor
+Alias TRHData(1)=AirT
+Alias TRHData(2)=RelHum
+
+'Tank differential pressure signal, mV
+Public TankP
+'PMT supply voltage
+Public HV
+'Calibrated differential pressure, Pa, tank pressure referenced to ambient
+Public TankPPa
+'External flow
+Public ExFlow
+'Signal+noise counts (Lower level discriminator)
+Public LLD
+'Noise counts (Upper level discriminator)
+Public ULD
+'Gas meter impeller counts
+Public Gas_meter
+'Datalogger panel temperature
+Public PanTemp
+'Internal flow velocity
+Public InFlow
+'External power supply voltage (historically this was a battery)
+Public BatV
+
+Units ExFlow = slpm
+Units InFlow = m/s
+Units Gas_meter = mV
+Units AirT = degC
+Units RelHum = %
+Units TankP = mV
+Units TankPPa = Pa
+Units Pres = hPa
+Units HV = V
+Units PanTemp = degC
+
+'Main output table (low time res)
+DataTable(Results, true, -1)
+  OpenInterval
+  DataInterval(0,30,Min,10)
+  Average (1, ExFlow,     IEEE4, 0)
+  Average (1, InFlow, FP2, 0)
+  Totalize(1, LLD,  IEEE4, 0)
+  Totalize(1, ULD,  IEEE4, 0)
+  Average (1, Gas_meter, IEEE4, 0)
+  Average (1, AirT,   FP2, 0)
+  Average (1, RelHum,   FP2, 0)
+  Average (1, TankP,   FP2, 0)
+  Average (1, TankPPa,   FP2, 0)
+  Average (1, Pres,IEEE4, 0)
+  Average (1, BV_Temp,FP2,False)
+  Minimum (1, BV_Qual,FP2,False,False)
+  Average (1, HV,         FP2, 0)
+  Average (1, PanTemp,    FP2, 0)
+  Average (1, BatV,       FP2, 0)
+
+EndTable
+
+DataTable(RTV,true,180)
+  OpenInterval
+  DataInterval(0,10,Sec,10)
+  Sample(1, ExFlow,FP2)
+  Sample (1, InFlow, FP2)
+  Sample(1, LLD,IEEE4)
+  Sample(1, ULD,IEEE4)
+  Sample(1, Pres,IEEE4)
+  Sample(1,BV_Temp,FP2)
+  Sample(1,BV_Qual,FP2)
+  Sample (1, TankP,FP2)
+  Sample (1, TankPPa,FP2)
+  Sample (1, HV,FP2)
+  Sample (1, RelHum, FP2)
+  Sample (1, AirT, FP2)
+EndTable
+
+' Convert from mV to Pascals for a Novus NPT785 differential pressure sensor
+' Assumptions:
+'		* device set to current output mode (4-20mA)
+'   * Configured pressure range is -200Pa to +800Pa
+'   * Terminating resistor is 120 ohm (chosen to be the same value as the
+'     Vent Captor sensor)
+Sub ConvertNPT785_mV_to_Pa(signal_mv, pressure_pa)
+  Dim Imin,Imax,Pmin,Pmax, deltaP, deltaI,R
+  ' min/max current in mA
+  Imin = 4
+  Imax = 20
+  ' min/max presure in Pa
+  Pmin = -200
+  Pmax = 800
+  deltaP = Pmax-Pmin
+  deltaI = Imax-Imin
+  ' terminating resitor
+  R = 120
+  pressure_pa = (signal_mv/R - Imin) * deltaP/deltaI + Pmin
+EndSub
+
+
+' Convert from mV to standard litres per minute
+' Assumptions:
+'   * device transmits analog signal (0-5000 mV)
+'   * Configured flow range is flowMin - flowMax (set in subroutine)
+Sub Convert_mV_to_slpm(signal_mv, flow_slpm)
+  Dim mvMin, mvMax, flowMin, flowMax, delta_mv, delta_slpm
+  ' min/max signal in mV
+  mvMin = 0
+  mvMax = 5000
+  ' min/max presure in Pa
+  flowMin= 0
+  flowMax = 110
+  delta_mv = mvMax - mvMin
+  delta_slpm = flowMax - flowMin
+	flow_slpm = (signal_mv - mvMin) * delta_slpm/delta_mv + flowMin
+EndSub
+
+
+'----- MAIN PROGRAM
+
+BeginProg
+  Scan(10,Sec, 3, 0)
+    ' Counts on lower level discriminator (radon + noise counts)
+    PulseCount(LLD, 1,SE1, 0, 0, 1, 0)
+    ' Counts on upper level discriminator (noise counts)
+    PulseCount(ULD, 1,SE2, 0, 0, 1, 0)
+               
+    'Internal diagnostics
+    Battery(BatV)                                      
+    PanelTemp(PanTemp,50)
+    
+    'Analogue inputs, using single-ended channels
+    ' mV output from Novus TP NP785-20 differential pressure sensor
+    VoltSe(TankP, 1, mV2500,3, False, 0, _60Hz, 1, 0)
+    ConvertNPT785_mV_to_Pa(TankP, TankPPa)
+    ' High voltage setting (V)
+    VoltSe(HV,    1, mV2500,4, False, 0, _60Hz, 1, 0) 
+    ' Read flow rate through head #1 (cal assumes R=120ohms)
+    VoltSe(InFlow,1,mV2500,5,False,0,_60Hz,VC_SLOPE,VC_OFFSET)
+    ' Burkert type 8745 mass flow sensor
+    VoltSe(Gas_meter, 1,mV5000, 3,False,0,_60Hz,1,0)
+    Convert_mV_to_slpm(Gas_meter, ExFlow) 		
+    
+    'SDI-12, digital sensors
+    'Barometric Pressure Sensor measurements 'BV_BP', 'BV_Temp', and 
+    ''BV_Qual'
+    SDI12Recorder(BaroVUE(),C1,"1","M!",1,0,-1)
+    'HygroVUE5/HygroVUE10 Digital Temperature & Relative Humidity Sensor 
+    'AirTC' and 'RH'
+    SDI12Recorder(TRHData(),C1,"0","M!",1,0,-1)
+
+    CallTable Results
+    CallTable RTV
+  NextScan
+EndProg
+
+' ...
+' ... Wiring summary
+' ...
+' LLD:      SE1
+' ULD:      SE2
+' TankP:    SE3
+' HV:       SE4
+' InFlow:   SE5
+' ExFlow:   SE6
+' SDI-12:   C1
