@@ -728,7 +728,9 @@ class DataStore(object):
             for r in rows:
                 name_to_id[r["name"]] = r["id"]
                 id_to_name[r["id"]] = r["name"]
-
+            
+            # don't modify the detector name field in-place
+            data = copy.deepcopy(data)
             for itm in data:
                 itm["DetectorName"] = name_to_id[itm["DetectorName"]]
 
