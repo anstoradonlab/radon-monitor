@@ -1,12 +1,28 @@
 # Changelog
 
+## Version 10.15.1
+
+31 July 2024
+
+ - Change the NSIS installer so that it runs the uninstaller when installing 
+   a new version into the same directory on Windows
+ - Open serial port in exclusive mode on Linux
+ - Fix a problem with command-line "query" when running on Linux
+
 ## Version 10.15
+
+23 July 2024 
+
+*found issues with installer so the installer was not posted to github*
+
  - Packaging on Windows now uses Python v3.11 and PyQt v5.15
  - Added a "scheduled tasks" view which displays RDM's internal state.  This is useful for debugging or for displaying the time until the next calibration.
  - Prevent the 'inconsistent state' message from appearing more than once per hour
  - Improve missing data handling in sensitivity sweep
 
 ## Version 10.14
+
+18 June 2024
 
  - Add an experimental option to send incoming data out across the network.
    This is a feature which is intended for use with [OpenRVDAS](https://openrvdas.org/), although it could be 
