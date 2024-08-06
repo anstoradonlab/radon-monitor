@@ -6,14 +6,15 @@ XXX
 
  - Transparently handle data from kinds of external flow sensors and rapidly update the 
    flow rate display for the sensors which allow this
- - 
+ - Remove duplicate rows when archiving data (duplicates are rare but possible)
+
 
 ## Version 10.15.1
 
 31 July 2024
 
- - Change the NSIS installer so that it runs the uninstaller when installing 
-   a new version into the same directory on Windows
+ - Change the NSIS installer so that it runs an uninstaller when installing 
+   a new version into the same directory (on Windows)
  - Open serial port in exclusive mode on Linux
  - Fix a problem with command-line "query" when running on Linux
 

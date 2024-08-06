@@ -51,3 +51,37 @@ def test_datastore(tmp_path):
     assert rows == []
 
 
+def test_datastore_with_rollover(tmp_path):
+    config = DataStoreConfigStub()
+    config.data_file = str(tmp_path / "data-other.db")
+    archive_dir = tmp_path
+
+    print("Testing datastore in", tmp_path)
+    ds = DataStore(config)
+
+
+    # mock data
+    #   - old so it triggers roll-over
+    #   - contains duplicates
+
+    told = t0 - datetime.timedelta(days=62)
+    row = {"Datetime": told, "RecNum": 103, "LLD": 123.0, "DetectorName": "DetectorA"}
+    data = []
+    ## about two months' of 10-sec data
+    #num_good = 24*60*6 * 62
+    num_good = 1000
+    num_duplicates = 50
+    dt = datetime.timedelta(seconds=10)
+    for ii in range(num_good):
+        r = copy.deepcopy(row)
+        r['Datetime'] += ii*dt
+        data.append(r)
+    for ii in range(num_duplicates):
+        r = copy.deepcopy(row)
+        r['Datetime'] += ii*dt
+        data.append(r)
+
+
+    ds.add_records("TEST", data)
+    
+    ds.archive_data(str(archive_dir))

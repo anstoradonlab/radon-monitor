@@ -96,7 +96,7 @@ def test_main_controller_in_thread(tmp_path):
 
 
 def test_main_controller_in_separate_process(tmp_path):
-    if sys.platform == "nt":
+    if sys.platform == "win32":
         pytest.skip("Separate process not supported on Windows")
     
         print("testing in {}".format(tmp_path))

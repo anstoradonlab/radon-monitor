@@ -20,6 +20,7 @@ from typing import Union, Dict, Any
 
 from .flag_calc import FlagCalculator
 from .data_util import *
+from .database_util import deduplicate_table
 from .udp_broadcast import udp_broadcast
 from .configuration import Configuration
 import json
@@ -1382,7 +1383,7 @@ class DataStore(object):
                 itm[1] for itm in con.execute(f"PRAGMA table_info({table_name})")
             ]
             db_column_names_sql = ",".join(db_column_names)
-            cursor = con.cursor()
+            
             for y, m in iter_months(database_mintime, threshold_time):
                 t0_query = datetime.datetime(y, m, 1, 0, 0, 0)
                 y1, m1 = next_year_month(y, m)
@@ -1454,6 +1455,8 @@ class DataStore(object):
                 _logger.info(
                     f"Archiving data for {y}-{m:02} from table {table_name} ({nrows} rows) took {datetime.datetime.now(datetime.timezone.utc) - t0}"
                 )
+                deduplicate_table(con_archive, table_name)
+
                 # sleep to give other tasks a chance to access the database
                 time.sleep(0.25)
 
