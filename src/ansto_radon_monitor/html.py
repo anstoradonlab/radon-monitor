@@ -13,22 +13,12 @@ def status_as_html(title, info):
 
     """
 
-    def fmt(value, description):
-        """Tweak how values are displayed based on what quantity they represent
-
+    def fmt(value, _description):
         """
-        if description == "Pressure":
-            # Pressure: round off to 1 decimal place
-            try:
-                # This block may raise an exception if the value is
-                #  - a string (e.g. missing value placeholder, "---")
-                #  - an integer
-                value = float(value)
-                ret = f"{value:.1f}"
-                return ret
-            except:
-                pass
-                # print(f"error processing value: {value}")
+        Tweak how values are displayed based on what quantity they represent
+
+        (just a basic conversion to string at the moment)
+        """
                 
         return f"{value}"        
 

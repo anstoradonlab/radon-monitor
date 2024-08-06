@@ -1,5 +1,13 @@
 # Changelog
 
+## Version 10.16
+
+XXX
+
+ - Transparently handle data from kinds of external flow sensors and rapidly update the 
+   flow rate display for the sensors which allow this
+ - 
+
 ## Version 10.15.1
 
 31 July 2024

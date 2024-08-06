@@ -1133,6 +1133,7 @@ class DataLoggerThread(DataThread):
         # Rename certain tables
         # use like this:
         #  {"NAME_ON_DATALOGGER": "NAME_IN_DATABASE"}
+        self._logger_firmware = ""
         self._rename_table = {"HURD2OUT": "Results"}
         self._config = detector_config
         self._datalogger: typing.Optional[CR1000] = None
@@ -1141,6 +1142,10 @@ class DataLoggerThread(DataThread):
         self.name = f"DataLoggerThread({detector_config.name})"
         self.detectorName = detector_config.name
         self.tables: typing.List[str] = []
+        # Table definitions
+        self.table_def: typing.List[typing.Any] = []
+        # Flow calibration coefficient
+        self._flowcal = None
         # set this to a long time ago
         self._last_time_check = datetime.datetime.min
         # buffer for last 30 minutes of 10-second (RTV) measurements
@@ -1290,6 +1295,22 @@ class DataLoggerThread(DataThread):
         # if random.random() > 0.5:
         #    raise RuntimeError("Pretend error during re-connection")
 
+    def _table_fields(self, table_name: str) -> typing.List[str]:
+        """Return a list of fields in table 'table_name'."""
+        if len(self.table_def) == 0:
+            # probably table_def is not initialised
+            return []
+        
+        for tdef in self.table_def:
+            # Note: tdef is something like:
+            # {'TableName': b'Status', 'TableSize': 1, 'TimeType': 14, 'TblTimeInto': (0, 0), 'TblInterval': (0, 0)}
+            if str(tdef['Header']['TableName'], 'utf8') == table_name:
+                names = [str(itm["FieldName"], "utf8") for itm in tdef["Fields"]]
+                return names
+        
+        # table not found
+        return []
+
     @task_description("Data logger: initialize")
     def connect_to_datalogger(self, detector_config):
         try:
@@ -1326,6 +1347,28 @@ class DataLoggerThread(DataThread):
                 self.update_heartbeat_time()
                 # Filter the tables - only include the ones which are useful
                 self.tables = [itm for itm in self.tables if itm in self._tables_to_use]
+
+                # the consequences of these statements failing are incorrect display, but they'll
+                # have no impact on the data as it is logged, hence not a critical failure. 
+                try:
+                    # keep a copy of the table definitions
+                    self.table_def = self._datalogger.table_def
+                except Exception as ex:
+                    _logger.error(f"Unable to retrieve table definitions from datalogger: {traceback.format_exc()}")
+
+                expect_to_have_flowcal = False
+                try: 
+                    # the "flowcal" variable should be present for the old-style logger 
+                    # program, and these versions also report ExFlow_Tot (rather than ExFlow_Avg)
+                    expect_to_have_flowcal = "ExFlow_Tot" in self._table_fields("Results")
+                except Exception as ex:
+                    pass
+
+                try:
+                    self._flowcal = self._datalogger.get_values("Public", "flowcal")
+                except Exception as ex:
+                    if expect_to_have_flowcal:
+                        _logger.warning(f"Unable to retrieve flowcal value from datalogger: {traceback.format_exc()}")
 
                 self.status["link"] = "connected"
                 self.status["serial"] = int(self._datalogger.getprogstat()["SerialNbr"])
@@ -1462,9 +1505,42 @@ class DataLoggerThread(DataThread):
             ],
         }
         nvar = len(info["var"])
+        # There are three main scenarios when handling the external flow rate
+        # 1) Oldest and currently most common setup: slow, cyclic volume sensor
+        #    with 0.5 lpm cyclic volume (1 lpm = 15 pulses / 30minute; 1.3 pulse
+        #    per minute is typical).  The variable is called ExFlow_Tot and 
+        #    Exflow values in RTV are in l/min / 180 (so that the units of Exflow_Tot
+        #    in the Results table are l/min, after summing over 30 min of 10s samples)
+        # 2) Coulterlec's system with a PLC used to generate pulse output from
+        #    an off-the-shelf flow sensor (1 pulse/sec = 1 lpm); 800 counts per
+        #    10 seconds is typical.  The variable is called ExFlow_Tot.  Exflow
+        #    in RTV is in l/min / 180
+        # 3) Burkert sensor which outputs voltage proportional to flow rate.
+        #    The variable is called ExFlow_Avg.  Exflow in RTV is in standard l/min
+        #    
         # Exflow needs to be treated similarly to LLD and ULD
         exflow_value = "---"
+        # defaults, suitable for case 3
+        exflow_conv = 1.0
+        exflow_needs_avg = False
+        # The pulse-counting versions have "_Tot" in the "Results" table
+        if "ExFlow_Tot" in self._table_fields("Results"):
+            # this is case 1 or case 2.  To tell them apart, see if we're
+            # operating at roughly 1 Hz = 1 lpm
+            if self._flowcal is not None and abs(self._flowcal - 1.0/1800.0) < 0.0001:
+                # this is the PLC version
+                exflow_needs_avg = False
+                exflow_conv = 180.0
+            else:
+                exflow_needs_avg = True
+                exflow_conv = 1.0
+                info["units"][2] = "avg L/min"
+        else:
+            exflow_needs_avg = False
+            exflow_conv = 1.0
+            info["units"][2] = "std L/min"
 
+        # Handle accumulation/averaging over recent data
         if len(self._rtv_buffer) == 0:
             values = ["---"] * nvar
         else:
@@ -1478,7 +1554,8 @@ class DataLoggerThread(DataThread):
             else:
                 # don't yet have 30 minutes of data
                 if len(self._rtv_buffer) < self._rtv_buffer.maxlen:
-                    values = ["wait", "wait", "wait"]
+                    values = ["wait", "wait"]
+                    exflow_value = "wait"
                 else:
                     time_span = (
                         self._rtv_buffer[-1]["Datetime"]
@@ -1488,7 +1565,8 @@ class DataLoggerThread(DataThread):
                         # the buffer is the correct length, but it covers the wrong period
                         # (logging might have been interrupted)
 
-                        values = ["wait2", "wait2", "wait2"]
+                        values = ["wait2", "wait2"]
+                        exflow_value = "wait2"
                     else:
                         try:
                             lld_total = sum([itm["LLD"] for itm in self._rtv_buffer])
@@ -1499,12 +1577,16 @@ class DataLoggerThread(DataThread):
                         except KeyError:
                             uld_total = "---"
                         try:
-                            exflow_total = sum(
+                            exflow_value = sum(
                                 [itm["ExFlow"] for itm in self._rtv_buffer]
                             )
                         except KeyError:
-                            exflow_total = "---"
-                        values = [lld_total, uld_total, exflow_total]
+                            exflow_value = "---"
+                        values = [lld_total, uld_total]
+                
+                if not exflow_needs_avg:
+                    exflow_value = recent_data.get("ExFlow", "---")*exflow_conv
+                values.append(exflow_value)
 
                 # other values are just taken from the most recent info
                 def converter(k):
@@ -1513,7 +1595,7 @@ class DataLoggerThread(DataThread):
                     if (
                         k.startswith("LLD")
                         or k.startswith("ULD")
-                        or k.startswith("Press")
+                        or k.startswith("Pres")
                     ):
                         c = int
                     elif (
@@ -1540,6 +1622,7 @@ class DataLoggerThread(DataThread):
                 ### - no, this conversion happens already
                 ### values[-1] = round(values[-1] / 100.0, 1)
                 values = [str(itm) for itm in values_formatted]
+
         info["values"] = values
         title = self.detectorName + " Radon Detector"
         html = status_as_html(title, info)
@@ -1559,6 +1642,7 @@ class DataLoggerThread(DataThread):
             fname,
             detector_name=self.detectorName,
         )
+        self._logger_firmware = data_file
         self._datastore.add_log_message(
             "LoggerFirmware",
             data_file,
@@ -1786,7 +1870,7 @@ class MockCR1000(object):
                     "InFlow": 11.1,
                     "LLD": rng.poisson(rn_func(t) / 6.0 / 30.0),
                     "ULD": 0,
-                    "Pres": 101325.01,
+                    "Pres": 1013.2501,
                     "TankP": 100.01,
                     "HV": 980.5,
                     "RelHum": 80.5,
@@ -1806,7 +1890,7 @@ class MockCR1000(object):
                     "AirT_Avg": -168.9,
                     "RelHum_Avg": 34.86,
                     "TankP_Avg": -558.7,
-                    "Pres_Avg": 419.6658020019531,
+                    "Pres_Avg": 1013.2501,
                     "HV_Avg": -712.7,
                     "PanTemp_Avg": 21.26,
                     "BatV_Avg": 15.24,
