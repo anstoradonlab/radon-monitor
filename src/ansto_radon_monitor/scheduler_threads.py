@@ -7,6 +7,7 @@ import hashlib
 import json
 import logging
 import math
+import os
 import pathlib
 import pprint
 import sched
@@ -1821,8 +1822,13 @@ class MockCR1000(object):
         # an arbitrary reference time
         tref = datetime.datetime(2000, 1, 1, tzinfo=datetime.timezone.utc)
         # number of days back in time to generate data for
-        # (need more than 60 to test rollover functions)
-        numdays = 100
+        #  - need more than 60 to test rollover functions, but 
+        #    when running on github actions we want tests to run
+        #    quickly
+        if os.getenv("GITHUB_ACTIONS") is not None or os.getenv("FAST_TESTS") is not None:
+            numdays = 2
+        else:
+            numdays = 100
         t_latest = datetime.datetime.now(datetime.timezone.utc)
 
         if table_name == "RTV":
