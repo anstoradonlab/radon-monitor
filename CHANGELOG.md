@@ -2,11 +2,22 @@
 
 ## Version 10.16
 
-XXX
+7 August 2024
 
  - Transparently handle data from kinds of external flow sensors and rapidly update the 
    flow rate display for the sensors which allow this
  - Remove duplicate rows when archiving data (duplicates are rare but possible)
+ - Improve clock synchronisation accuracy between computer and datalogger
+ - Optionally check PC clock against an independent NTP server.  Note that many
+   corporate filewalls are set to block NTP traffic, so you might need to use
+   your organisation's NTP server.  If enabled, datalogger clocks will only be
+   updated if this check succeeds but RDM will never change the computer clock 
+   To enable this option, set the NTP server  name in the configuration file, 
+   for example: 
+
+        [data]
+        ntp_server=pool.ntp.org
+        
 
 
 ## Version 10.15.1
