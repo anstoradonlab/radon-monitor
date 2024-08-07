@@ -74,6 +74,7 @@ class DetectorConfig:
     csv_file_pattern: typing.Optional[str] = None
     datalogger_time_offset: float = 0.0
     report_pakbus_statistics: bool = False
+    check_ntp_sync: typing.Optional[bool] = None
 
 
 @dataclass
@@ -128,6 +129,7 @@ class Configuration:
     udp_destination: typing.Optional[str] = None
     udp_port: int = 51520
     udp_multicast_interface: typing.Optional[str] = None
+    ntp_server: typing.Optional[str] = None
 
     
     def as_text(self, include_sensitive=False) -> str:
@@ -187,6 +189,14 @@ def parse_config(raw_cfg) -> Configuration:
         configuration.data_file = pathlib.Path(
             configuration.data_dir, "current", "radon.db"
         )
+    
+    # For the ntp server configuration, set the per-detector
+    # flags if the user has set a ntp server address
+    for detconfig in configuration.detectors:
+        if detconfig.check_ntp_sync is None:
+            detconfig.check_ntp_sync = ((configuration.ntp_server is not None) and 
+                                        (configuration.ntp_server != ""))
+
 
     return configuration
 

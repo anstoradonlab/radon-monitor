@@ -518,7 +518,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         try:
             self.instrument_controller = initialize(config, mode="thread")
         except Exception as ex:
-            _logger.critical("Aborting startup")
+            _logger.critical(f"Aborting startup because of {ex}: {traceback.format_exc()}")
             return
 
         # sync the gui's Maintenance mode state with the backend

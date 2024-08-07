@@ -34,6 +34,7 @@ _logger = logging.getLogger()
 from .labjack_interface import CalBoxLabjack, CapeGrimLabjack
 from .burkert_gateway import BurkertGateway
 from .configuration import DetectorConfig
+from .ntplib import NTPClient
 
 
 def log_backtrace_all_threads():
@@ -1470,9 +1471,10 @@ class DataLoggerThread(DataThread):
             saved_max_hb_age = self.max_heartbeat_age_seconds
             self.max_heartbeat_age_seconds = 300
             try:
-                self.synchronise_clock()
-                self.log_status()
-                self._last_time_check = datetime.datetime.now(datetime.timezone.utc)
+                retry_needed = self.synchronise_clock(check_ntp_sync=self._config.check_ntp_sync)
+                if not retry_needed:
+                    self.log_status()
+                    self._last_time_check = datetime.datetime.now(datetime.timezone.utc)
             finally:
                 self.update_heartbeat_time()
                 self.max_heartbeat_age_seconds = saved_max_hb_age
@@ -1705,18 +1707,30 @@ class DataLoggerThread(DataThread):
     def synchronise_clock(
         self, maximum_time_difference_seconds=60, check_ntp_sync=True
     ):
-        """Attempt to synchronise the clock on the datalogger with computer."""
+        """
+        Attempt to synchronise the clock on the datalogger with computer.
+
+        Returns boolean "retry_needed".  If retry_needed is true then the result was 
+        unclear and synchronisation should be re-attempted after a short delay,
+        e.g. 10s
+        
+        """
         # NOTE: the api for adjusting the datalogger clock isn't accurate beyond 1 second
         #       but I'm creating the underlying pakbus messages myself
         #       search for function: increment_datalogger_clock
         minimum_time_difference_seconds = 1
-        # TODO: check that the computer time is reliable, i.e. NTP sync
-        #       probably use this cross-platform solution https://github.com/cf-natali/ntplib
-        #       with a ntp server provided by the configuration
-        #       Fallback options are w32tm (windows:    https://superuser.com/questions/425233/how-can-i-check-a-systems-current-ntp-configuration)
-        #         ntpstat (Linux), dbus (Linux: https://raspberrypi.stackexchange.com/questions/80219/recommended-way-for-a-python-script-to-check-ntp-update-status-and-initiate-an )
-
-        ntp_sync_ok = "unknown"  # TODO: flag this as true or false
+        maximum_ntp_time_difference_seconds = 10       
+        if not check_ntp_sync:
+            # If the user has deliberately unset the ntp_server option, then we'll just go ahead
+            # and trust the computer time
+            ntp_sync_ok = "unknown"  # TODO: flag this as true or false
+        else:
+            ntp_offset = self._datastore.get_state("NTPOffset")
+            if ntp_offset is None:
+                # the other thread probably hasn't finished synchronising
+                return False
+            ntp_sync_ok = abs(ntp_offset) < maximum_ntp_time_difference_seconds
+        
         clock_offset, halfquery = self.get_clock_offset()
         self._datastore.add_log_message(
             "ClockCheck",
@@ -1947,6 +1961,8 @@ class DataMinderThread(DataThread):
         self._csv_output_lock = threading.RLock()
 
         self.run_sync_csv_files(reschedule=True, include_archives=True)
+        if self._config.ntp_server is not None and self._config.ntp_server != "":
+            self.ntp_time_check(reschedule=True)
 
         # perform some tasks a short time after startup
         backup_time_of_day = config.backup_time_of_day
@@ -2122,6 +2138,42 @@ class DataMinderThread(DataThread):
                 priority=0,
                 action=self.run_database_tasks,
                 kwargs={"backup_time_of_day": backup_time_of_day},
+            )
+
+        self.update_heartbeat_time()
+        with self._heartbeat_time_lock:
+            self._tolerate_hang = False
+
+
+    @task_description("Check clock against independent time server")
+    def ntp_time_check(self, reschedule=True):
+
+        with self._heartbeat_time_lock:
+            self._tolerate_hang = True
+
+        ntp_offset = None
+        if self._config.ntp_server is None or self._config.ntp_server != "":
+            try:
+                _logger.info(f"Checking computer time vs {self._config.ntp_server}.")
+                c = NTPClient()
+                ntp_response = c.request(self._config.ntp_server, version=3)
+                ntp_offset = ntp_response.offset
+                self._datastore.add_log_message("NTPOffset", ntp_offset)
+                _logger.info(f"Clock offset vs {self._config.ntp_server}: {ntp_offset}")
+            except Exception as ex:
+                _logger.error(f"Error querying NTP server \"{self._config.ntp_server}\": {traceback.format_exc()}")
+        else:
+            _logger.info("Clock checks against an independent NTP server are disabled.")
+
+        self.ntp_offset = ntp_offset
+        self._datastore.set_state("NTPOffset", ntp_offset)
+
+        if reschedule:
+            seconds_per_day = 24*60*60
+            self._scheduler.enter(
+                delay=seconds_per_day,
+                priority=0,
+                action=self.ntp_time_check,
             )
 
         self.update_heartbeat_time()

@@ -240,12 +240,15 @@ class MainController(object):
                 f"Unable to open database because of error: {ex}, {traceback.format_exc()}"
             )
             raise ex
+        
+        # indicate that NTP checks haven't yet been performed (since startup) 
+        self.datastore.set_state("NTPOffset", None)
 
         # a flag used to signal that the controller is shutting down
         self._shutting_down = False
         self._configuration = configuration
         logging.info(f"RDM version {ansto_radon_monitor.__version__}")
-        # a publically accessiable flag to indicate weather or not there is a calibration
+        # a publicly accessible flag to indicate whether or not there is a calibration
         # unit present
         self.has_calibration_unit = False
         try:
