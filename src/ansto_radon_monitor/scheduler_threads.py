@@ -1658,28 +1658,27 @@ class DataLoggerThread(DataThread):
         as 1/2 the time it took to query the datalogger
         """
         time_offset = datetime.timedelta(hours=self._config.datalogger_time_offset)
-        # measure the length of time required to query the datalogger clock
-        # -- first query it, in case of slow response due to power saving
-        # -- mode or some such
-        t_datalogger = (
-            self._datalogger.gettime().replace(tzinfo=datetime.timezone.utc)
-            - time_offset
-        )
-        tick = time.time()
-        t_datalogger = (
-            self._datalogger.gettime().replace(tzinfo=datetime.timezone.utc)
-            - time_offset
-        )
-        t_computer = datetime.datetime.now(datetime.timezone.utc)
-        tock = time.time()
-        time_required_for_query = tock - tick
-        halfquery = datetime.timedelta(seconds=time_required_for_query / 2.0)
-        # estimate that the actual time on the datalogger probably happend
-        # a short time ago
-        t_datalogger = t_datalogger - halfquery
-        clock_offset = (t_datalogger - t_computer).total_seconds()
+        def nsec_to_time(nsec):
+            '''Convert (seconds,nanoseconds) since 1990-01-01 tuple to datetime.'''
+            tref = datetime.datetime(1990, 1, 1, 0, 0, 0, tzinfo=datetime.timezone.utc)
+            dt = datetime.timedelta(seconds=nsec[0], microseconds=nsec[1]//1000)
+            return tref + dt
+        
+        if hasattr(self._datalogger, 'send_wait'):
+            _hdr, msg, send_time = self._datalogger.send_wait(self._datalogger.pakbus.get_clock_cmd())
+            tc = datetime.datetime.now(datetime.timezone.utc)
+            # estimate that about half of the query time has elapsed since
+            # the datalogger reported the current time
+            tdl = nsec_to_time(msg["Time"]) + send_time//2 - time_offset
+        else:
+            # Mock datalogger, doesn't have "send_wait"
+            tdl = self._datalogger.gettime().replace(tzinfo=datetime.timezone.utc) - time_offset
+            tc = datetime.datetime.now(datetime.timezone.utc)
+            send_time = datetime.timedelta(microseconds=1000)
+        
+        clock_offset = (tdl - tc).total_seconds()
+        return clock_offset, send_time//2
 
-        return clock_offset, halfquery
 
     def increment_datalogger_clock(self, increment_dt: float):
         """
@@ -1723,7 +1722,7 @@ class DataLoggerThread(DataThread):
         if not check_ntp_sync:
             # If the user has deliberately unset the ntp_server option, then we'll just go ahead
             # and trust the computer time
-            ntp_sync_ok = "unknown"  # TODO: flag this as true or false
+            ntp_sync_ok = "unknown"
         else:
             ntp_offset = self._datastore.get_state("NTPOffset")
             if ntp_offset is None:
@@ -1731,7 +1730,7 @@ class DataLoggerThread(DataThread):
                 return False
             ntp_sync_ok = abs(ntp_offset) < maximum_ntp_time_difference_seconds
         
-        clock_offset, halfquery = self.get_clock_offset()
+        clock_offset, _halfquery = self.get_clock_offset()
         self._datastore.add_log_message(
             "ClockCheck",
             f"Computer synced with network time: {ntp_sync_ok}, time difference (datalogger minus computer): {clock_offset}, detector: {self.detectorName}",
@@ -1758,6 +1757,7 @@ class DataLoggerThread(DataThread):
             )
         else:
             self.increment_datalogger_clock(-clock_offset)
+            _logger.info(f"Adjusted datalogger clock, adding {-clock_offset} sec.")
             clock_offset, halfquery = self.get_clock_offset()
             self._datastore.add_log_message(
                 "ClockCheck",
