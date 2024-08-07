@@ -6,13 +6,13 @@
 'Program author: Alan Griffiths
 '
 'Changes
-' Alan, July 2014: First version, based on CR800 code dating back to '07
+' Alan, July 2024: First version, based on CR800 code dating back to '07
 '                  with stuff related to calibrations removed.
 '
 'CR Basic Programming Manual: https://help.campbellsci.com/crbasic/cr6/
 
 'Calibration factor for 2L cyclic volume flow meter
-Const flowcal = 0.0667
+Public flowcal = 0.0667
 'Calibration factors for vent captor terminating into 120 ohm
 'resistor (converts from mV input to m/s)
 Const VC_SLOPE = 0.010417
