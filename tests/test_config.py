@@ -2,6 +2,7 @@
 
 import json
 import logging
+import pathlib
 import tempfile
 
 import pytest
@@ -13,7 +14,7 @@ __author__ = "Alan Griffiths"
 __copyright__ = "Alan Griffiths"
 __license__ = "mit"
 
-INIFILE = "../sample_config.ini"
+INIFILE = pathlib.Path(__file__).parent / ".." / "sample_config.ini"
 
 @pytest.fixture(scope="session")
 def temp_directory():
@@ -33,6 +34,14 @@ def get_raw_cfg():
     raw_cfg = raw_config_from_inifile(INIFILE)
     return raw_cfg
 
+def test_bad_config():
+    raw_config = get_raw_cfg()
+
+    raw_config["detectors"][0]["serial_port"] = "COM1"
+    raw_config["detectors"][0]["network_address"] = "192.168.1.1"
+    with pytest.raises(Exception):
+        _cfg = parse_config(raw_config)
+
     
 
 def test_parse_command_line_args():
@@ -47,9 +56,9 @@ def test_load_config_from_commandline():
     config, cmdline_args = config_from_commandline(args, raw_cfg=get_raw_cfg())
     assert config.loglevel == logging.DEBUG
 
-    args = ["run"]
+    args = ["-v", "run"]
     config, cmdline_args = config_from_commandline(args, raw_cfg=get_raw_cfg())
-    assert config.loglevel == logging.ERROR
+    assert config.loglevel == logging.INFO
 
 
 def test_fg_flag():

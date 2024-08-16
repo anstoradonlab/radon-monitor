@@ -65,6 +65,8 @@ class DetectorConfig:
 
     name: str = ""
     serial_port: str = ""
+    network_address: str = ""
+    network_port: int = 6785
     baudrate: int = 9600
     kind: str = ""
     volume_m3: typing.Optional[float] = None
@@ -192,11 +194,15 @@ def parse_config(raw_cfg) -> Configuration:
     
     # For the ntp server configuration, set the per-detector
     # flags if the user has set a ntp server address
-    for detconfig in configuration.detectors:
+    
+    for ii, detconfig in enumerate(configuration.detectors):
         if detconfig.check_ntp_sync is None:
             detconfig.check_ntp_sync = ((configuration.ntp_server is not None) and 
                                         (configuration.ntp_server != ""))
-
+        if detconfig.serial_port != "" and detconfig.network_address != "":
+            error_message = f"Specifiy either 'serial_port' OR 'network_address' but not both; detector {ii+1} has been configured with 'serial_port = {detconfig.serial_port}' and 'network_address = {detconfig.network_address}'"
+            _logger.error(error_message)
+            raise RuntimeError(error_message)
 
     return configuration
 

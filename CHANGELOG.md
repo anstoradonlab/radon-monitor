@@ -1,5 +1,28 @@
 # Changelog
 
+## Version 10.17
+
+RELEASE_DATE
+
+ - Adds the option to connect to radon detector's internal datalogger over ethernet 
+   instead of the serial port.
+   This is only supported for dataloggers without pakbus encryption and without
+   a security code, so only use it over trusted networks.  To configure this,
+   remove the `serial_port` key from the `detector` configuration and instead
+   add `network_address=[ip address or hostname]`.  If the datalogger is re-configured
+   to use a non-standard port, also add `network_port=[port]`.  For example, instead of: 
+
+        [detector1]
+        serial_port=COM1
+
+    use something like this instead (using your own IP address): 
+
+        [detector1]
+        network_address=192.168.1.100
+
+    By default, `network_port` is set to PakBus default of `6785` and does not need
+    to be specified.
+
 ## Version 10.16
 
 7 August 2024

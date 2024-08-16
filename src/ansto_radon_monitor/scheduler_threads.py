@@ -24,6 +24,8 @@ import numpy as np
 import serial
 from pycampbellcr1000 import CR1000
 from pycampbellcr1000.utils import ListDict
+#from pylink.link import TCPLink
+from .link import TCPLink
 
 from ansto_radon_monitor.configuration import Configuration
 from ansto_radon_monitor.datastore import DataStore
@@ -1183,6 +1185,17 @@ class DataLoggerThread(DataThread):
         self.state_changed.set()
 
     def _connect(self, detector_config):
+        if detector_config.serial_port:
+            self._serial_connect(detector_config)
+            return
+        elif detector_config.network_address:
+            self._tcp_connect(detector_config)
+            return
+        
+        raise RuntimeError("Connection requires 'serial_port' or 'network_address' to be set.")
+        
+
+    def _serial_connect(self, detector_config):
         # don't use from_url ref:
         # https://github.com/LionelDarras/PyCampbellCR1000/issues/21#issuecomment-1117096281
         # use port=None to create a serial port object without opening the underlying port
@@ -1207,6 +1220,11 @@ class DataLoggerThread(DataThread):
         # the port right after changing the timeout - add a delay here to (hopefully) avoid this
         # issue
         time.sleep(0.25)
+    
+    def _tcp_connect(self, detector_config):
+        link = TCPLink(host=detector_config.network_address, port=detector_config.network_port)
+        self._datalogger = CR1000(link)
+
 
     def _fill_rtv_buffer(self):
         """
@@ -1387,7 +1405,11 @@ class DataLoggerThread(DataThread):
 
                 if hasattr(self._datalogger.pakbus.link, "baudrate"):
                     _logger.info(
-                        f"Connected to datalogger (serial {self.status['serial']}) using serial port, baudrate: {self._datalogger.pakbus.link.baudrate}"
+                        f"Connected to datalogger (serial number {self.status['serial']}) using a serial port, baudrate: {self._datalogger.pakbus.link.baudrate}"
+                    )
+                elif hasattr(self._datalogger.pakbus.link, "host"):
+                    _logger.info(
+                        f"Connected to datalogger (serial number {self.status['serial']}) over the network, host: {self._datalogger.pakbus.link.host} port: {self._datalogger.pakbus.link.port}"
                     )
 
                 # set this to a long time ago
@@ -1412,50 +1434,53 @@ class DataLoggerThread(DataThread):
 
         # TODO: handle lost connection
         self.status["link"] = "retrieving data"
-        with self._lock:
-            # simulate an intermittent error
-            # import random
-            # if random.random() > 0.9:
-            #    raise RuntimeError("This is not a real error")
-            for table_name in self.tables:
-                destination_table_name = self._rename_table.get(table_name, table_name)
-                # it's possible we might like to send data from each datalogger to a separate table.
-                # destination_table_name = self._config.name + "_" + table_name
-                update_time = self._datastore.get_update_time(
-                    destination_table_name, self.detectorName
-                )
-                if update_time is not None:
-                    # offset a little so that we don't grab the same record again and again
-                    update_time += datetime.timedelta(seconds=1)
-                    # The get_data_generator function doesn't like timezones
-                    update_time = update_time.replace(tzinfo=None)
-                    # convert from UTC (all timestamps in database are UTC) into
-                    # the datalogger's timezone (usually UTC, but sometimes not)
-                    update_time = update_time + time_offset
-                total_num_records = 0
-                # set stop date to a time in the future (because of the possibility that
-                # datalogger timezone doesn't match the computer timezone)
-                stop_date = datetime.datetime.utcnow() + datetime.timedelta(days=2)
-                for data in self._datalogger.get_data_generator(
-                    table_name, start_date=update_time, stop_date=stop_date
-                ):
-                    # return early if another task is trying to execute
-                    # (likely this is a shutdown request)
-                    if self.state_changed.is_set():
-                        return
-                    # it is Ok for this to take a long time to run - datalogger is slow
-                    # Note: I considered breaking out of the loop early after e.g. 5 seconds so that the other
-                    # tables get updated too, but that causes problems in the data archive code
-                    self.update_heartbeat_time()
-                    if len(data) > 0:
-                        total_num_records += len(data)
-                        msg = f"Received data ({total_num_records} records) from table {destination_table_name} with start_date = {update_time}."
-                        _logger.debug(msg)
-                        self.status["link"] = msg
+        # simulate an intermittent error
+        # import random
+        # if random.random() > 0.9:
+        #    raise RuntimeError("This is not a real error")
+        for table_name in self.tables:
+            destination_table_name = self._rename_table.get(table_name, table_name)
+            # it's possible we might like to send data from each datalogger to a separate table.
+            # destination_table_name = self._config.name + "_" + table_name
+            update_time = self._datastore.get_update_time(
+                destination_table_name, self.detectorName
+            )
+            if update_time is not None:
+                # offset a little so that we don't grab the same record again and again
+                update_time += datetime.timedelta(seconds=1)
+                # The get_data_generator function doesn't like timezones
+                update_time = update_time.replace(tzinfo=None)
+                # convert from UTC (all timestamps in database are UTC) into
+                # the datalogger's timezone (usually UTC, but sometimes not)
+                update_time = update_time + time_offset
+            total_num_records = 0
+            # set stop date to a time in the future (because of the possibility that
+            # datalogger timezone doesn't match the computer timezone)
+            stop_date = datetime.datetime.utcnow() + datetime.timedelta(days=2)
+            for data in self._datalogger.get_data_generator(
+                table_name, start_date=update_time, stop_date=stop_date
+            ):
+                # return early if another task is trying to execute
+                # (likely this is a shutdown request)
+                if self.state_changed.is_set():
+                    return
+                # it is Ok for this to take a long time to run - datalogger is slow
+                # Note: I considered breaking out of the loop early after e.g. 5 seconds so that the other
+                # tables get updated too, but that causes problems in the data archive code
+                self.update_heartbeat_time()
+                if len(data) > 0:
+                    total_num_records += len(data)
+                    msg = f"Received data ({total_num_records} records) from table {destination_table_name} with start_date = {update_time}."
+                    _logger.debug(msg)
+                    self.status["link"] = msg
 
-                        data = [fix_record(itm, time_offset) for itm in data]
+                    data = [fix_record(itm, time_offset) for itm in data]
+                    
+                    for itm in data:
+                        itm["DetectorName"] = self._config.name
+
+                    with self._lock:
                         for itm in data:
-                            itm["DetectorName"] = self._config.name
                             if table_name == "RTV":
                                 self._rtv_buffer.append(itm)
 
