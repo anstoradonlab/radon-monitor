@@ -209,7 +209,8 @@ def parse_config(raw_cfg) -> Configuration:
 
 def get_parser():
     parser = argparse.ArgumentParser(
-        description="Control and monitoring for ANSTO radon detectors"
+        description="Control and monitoring for ANSTO radon detectors",
+        formatter_class=argparse.RawTextHelpFormatter
     )
 
     parser.add_argument(
@@ -265,14 +266,16 @@ def get_parser():
             "listlabjacks",
         ],
         default="run",
-        help="""Action to perform
+        help="""The action to perform
     
-    RADON DETECTOR ACTIONS
-    These actions need a configuration file to be specified (using the -c or --config option)
+COMMAND-LINE RADON DETECTOR ACTIONS
+These actions need a configuration file to be specified (using the -c or 
+--config option)
 
     run
-    Run the monitoring process in the background (unless the -fg or --foreground option is also given)
-    
+    Run the monitoring process in the background (or, if used with the -fg or
+    --foreground option, run in the foreground)
+   
     query
     Display status of the monitoring process and exit
     
@@ -284,9 +287,17 @@ def get_parser():
     
     background
     Ask the monitoring process to  begin a background sequence
-    
-    AUXILLARY ACTIONS
-    These actions do not require a configuration file
+
+GUI OPTION
+This action does not require a configuration file to be specified
+
+    gui
+    Start the GUI.  The GUI will re-open the configuration file which
+    was most recently used from the GUI.  If the GUI was logging
+    when it was last used, then logging will resume.
+
+AUXILLARY ACTIONS
+These actions do not require a configuration file
 
     listserialports
     List all serial ports on the system
