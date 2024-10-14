@@ -515,8 +515,43 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             _logger.critical(f"Unable to initialise logging to {config.logfile} because of {ex}: {traceback.format_exc()}")
             return
 
+        # Start up the InstrumentController
         try:
-            self.instrument_controller = initialize(config, mode="thread")
+            # If running on Windows, only enable the option of running in threads
+            if os.name == "nt":
+                self.instrument_controller = initialize(config, mode="thread")
+            else:
+                # this import needed for except name, but doesn't need to exist on Windows
+                import zerorpc
+                # If running on Unix-like system, we could try connecting to a background
+                # process and then using IPC.
+                ##  try:
+                ##      self.instrument_controller = initialize(config, mode="connect")
+                ##      _logger.info("Connected to an already-running background process.")
+                ##  except zerorpc.exceptions.LostRemote:
+                ##      _logger.info("Unable to connect to a background process, starting one now.")
+                ##      self.instrument_controller = initialize(config, mode="daemon")
+                # BUT, IPC has bugs in it when used via the GUI.  The zeropc library:
+                #  - has issues with (1) dealing with datetime objects
+                #  - has problems with python property decorators
+                #    (e.g. like self.instrument_controller.maintenance_mode)
+                # so... instead we'll try to connect to a running background process, stop it
+                # and then use the GUI to take over.
+                try:
+                    _logger.info("Checking for an already-running background process")
+                    self.instrument_controller = initialize(config, mode="connect")
+                    self.instrument_controller.terminate()
+                    _logger.info("Background process found, stopping it")
+
+                except zerorpc.exceptions.LostRemote:
+                    _logger.info("Background process not found")
+                
+                # start an in-process controller in separate thread.  Same as Windows version.
+                self.instrument_controller = initialize(config, mode="thread")
+                
+
+
+
         except Exception as ex:
             _logger.critical(f"Aborting startup because of {ex}: {traceback.format_exc()}")
             return
