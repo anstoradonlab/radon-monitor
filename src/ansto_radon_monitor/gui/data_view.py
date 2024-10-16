@@ -377,6 +377,10 @@ class DataViewForm(QtWidgets.QWidget, Ui_DataViewForm):
         else:
             start_time = self.last_update_time
         t, newdata = ic.get_rows(self.table_name, start_time=start_time)
+        for itm in newdata:
+            if "Datetime" in itm:
+                itm["Datetime"] = datetime.datetime.fromtimestamp(itm["Datetime"], tz=datetime.timezone.utc)
+        
         if len(newdata) > 0:
             self.flag_new_plot_data = True
 

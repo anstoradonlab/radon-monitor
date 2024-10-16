@@ -286,7 +286,7 @@ class CAndBForm(QtWidgets.QWidget, Ui_CAndBForm):
         if self.startStopPushButton.isChecked():
             ic = self.mainwindow.instrument_controller
             reset_onceoff_controls = (ic is None) or (
-                not ic.cal_running and not ic.bg_running
+                not ic.get_cal_running() and not ic.get_bg_running()
             )
             if reset_onceoff_controls:
                 self.startStopPushButton.setChecked(False)

@@ -419,6 +419,13 @@ class MainController(object):
         if self._shutting_down:
             return (None, [])
         t, data = self.datastore.get_rows(table, start_time)
+        # converts dates into timestamps, which can be serialised
+        # for transparent inter-process communication
+        data = copy.deepcopy(data)
+        for itm in data:
+            if "Datetime" in itm:
+                itm["Datetime"] = itm["Datetime"].timestamp()
+        
         return t, data
 
     def list_tables(self):
@@ -605,16 +612,13 @@ class MainController(object):
         """return true if it looks like a bg and cal are scheduled"""
         return self._cal_system_task is None or self._cal_system_task.cal_and_bg_is_scheduled()
 
-    @property
-    def cal_running(self):
+    def get_cal_running(self):
         return self._cal_system_task is None or self._cal_system_task.cal_running
 
-    @property
-    def bg_running(self):
+    def get_bg_running(self):
         return self._cal_system_task is None or self._cal_system_task.bg_running
 
-    @property
-    def maintenance_mode(self):
+    def get_maintenance_mode(self):
         k = "Maintenance Mode"
         default_value = False
         mm = self.datastore.get_state(k)
@@ -626,8 +630,7 @@ class MainController(object):
 
         return bool(mm)
 
-    @maintenance_mode.setter
-    def maintenance_mode(self, mm_active):
+    def set_maintenance_mode(self, mm_active):
         k = "Maintenance Mode"
         mm_old = self.maintenance_mode
         if not (mm_active == mm_old):

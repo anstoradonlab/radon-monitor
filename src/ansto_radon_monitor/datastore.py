@@ -91,11 +91,31 @@ class LatestRowToken(object):
             self.t = t.t  # type: ignore
             self.latest_rowid = t.latest_rowid  # type: ignore
         else:
-            self.t = t
+            # store as a timestamp rather than as a python datetime
+            # to make this class easier to serialise
+            if t is None:
+                self.t = None
+            else:
+                self.t = t.timestamp()
+            
             self.latest_rowid = latest_rowid
     
+    def get_datetime(self):
+        if self.t is None:
+            return None
+        
+        return datetime.datetime.fromtimestamp(self.t, tz=datetime.timezone.utc)
+
+    def get_tstr(self):
+        if self.t is None:
+            return None
+        
+        t = self.get_datetime()
+        t_str = t.strftime("%Y-%m-%d %H:%M:%S")
+        return t_str
+
     def __str__(self):
-        return f"LatestRowToken(latest_rowid = {self.latest_rowid}, t = {self.t})"
+        return f"LatestRowToken(latest_rowid = {self.latest_rowid}, t = {self.get_datetime()})"
 
 
 # TODO: reorganise + clean up
@@ -1089,7 +1109,7 @@ class DataStore(object):
             # AND columname <'2012-12-26 00:00:00'
             # Note: this uses a subset (e.g. see https://stackoverflow.com/questions/7786570/get-another-order-after-limit)
             if t_token.t is not None:
-                t_str = t_token.t.strftime("%Y-%m-%d %H:%M:%S")
+                t_str = t_token.get_tstr()
                 sql = f"SELECT * from (SELECT * FROM {view_name} WHERE Datetime > '{t_str}' ORDER BY Datetime DESC LIMIT {maxrows}) as T1 order by Datetime ASC"
             else:
                 sql = f"SELECT * from (SELECT * FROM {view_name} ORDER BY Datetime DESC LIMIT {maxrows}) as T1 ORDER BY Datetime ASC"

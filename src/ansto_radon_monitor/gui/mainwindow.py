@@ -246,7 +246,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         # in the menu item
         self.actionMaintence_Mode.setChecked(mm_on)
         if self.instrument_controller is not None:
-            self.instrument_controller.maintenance_mode = mm_on
+            self.instrument_controller.set_maintenance_mode(mm_on)
 
     def show_or_hide_calibration_alert(self):
         cal_active = False
@@ -416,6 +416,10 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         if told is None:
             told = datetime.datetime.now(tz=datetime.timezone.utc) - max_age
         tnew, newdata = self.instrument_controller.get_rows(table_name, told)
+        for itm in newdata:
+            if "Datetime" in itm:
+                itm["Datetime"] = datetime.datetime.fromtimestamp(itm["Datetime"], tz=datetime.timezone.utc)
+
         # don't consider the time of the update, just the database rowid (see LastRowToken)
         # which lets us handle multiple detectors & interruptions in data transfer from
         # one of them
@@ -525,29 +529,34 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                 import zerorpc
                 # If running on Unix-like system, we could try connecting to a background
                 # process and then using IPC.
-                ##  try:
-                ##      self.instrument_controller = initialize(config, mode="connect")
-                ##      _logger.info("Connected to an already-running background process.")
-                ##  except zerorpc.exceptions.LostRemote:
-                ##      _logger.info("Unable to connect to a background process, starting one now.")
-                ##      self.instrument_controller = initialize(config, mode="daemon")
-                # BUT, IPC has bugs in it when used via the GUI.  The zeropc library:
-                #  - has issues with (1) dealing with datetime objects
-                #  - has problems with python property decorators
-                #    (e.g. like self.instrument_controller.maintenance_mode)
-                # so... instead we'll try to connect to a running background process, stop it
-                # and then use the GUI to take over.
-                try:
-                    _logger.info("Checking for an already-running background process")
-                    self.instrument_controller = initialize(config, mode="connect")
-                    self.instrument_controller.terminate()
-                    _logger.info("Background process found, stopping it")
+                with_separate_process = False
+                if with_separate_process:
+                    try:
+                        self.instrument_controller = initialize(config, mode="connect")
+                        # run something to confirm the connection is good
+                        _status = self.instrument_controller.get_status()
+                        _logger.info("Connected to an already-running background process.")
+                    except zerorpc.exceptions.LostRemote:
+                        _logger.info("Unable to connect to a background process, starting one now.")
+                        self.instrument_controller = initialize(config, mode="daemon")
+                else:
+                    # BUT, IPC has bugs in it when used via the GUI.  The zeropc library:
+                    #  - has issues with (1) dealing with datetime objects
+                    #  - has problems with python property decorators
+                    #    (e.g. like self.instrument_controller.maintenance_mode)
+                    # so... instead we'll try to connect to a running background process, stop it
+                    # and then use the GUI to take over.
+                    try:
+                        _logger.info("Checking for an already-running background process")
+                        self.instrument_controller = initialize(config, mode="connect")
+                        self.instrument_controller.terminate()
+                        _logger.info("Background process found, stopping it")
 
-                except zerorpc.exceptions.LostRemote:
-                    _logger.info("Background process not found")
-                
-                # start an in-process controller in separate thread.  Same as Windows version.
-                self.instrument_controller = initialize(config, mode="thread")
+                    except zerorpc.exceptions.LostRemote:
+                        _logger.info("Background process not found")
+                    
+                    # start an in-process controller in separate thread.  Same as Windows version.
+                    self.instrument_controller = initialize(config, mode="thread")
                 
 
 
@@ -557,7 +566,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             return
 
         # sync the gui's Maintenance mode state with the backend
-        mm = self.instrument_controller.maintenance_mode
+        mm = self.instrument_controller.get_maintenance_mode()
         self.actionMaintence_Mode.setChecked(mm)
         self.maintenanceModeFrame.setVisible(mm)
 
