@@ -2,7 +2,7 @@
 
 ## Version 10.17
 
-RELEASE_DATE
+16 October 2024
 
  - Adds the option to connect to radon detector's internal datalogger over ethernet 
    instead of the serial port.
@@ -22,6 +22,14 @@ RELEASE_DATE
 
     By default, `network_port` is set to PakBus default of `6785` and does not need
     to be specified.
+
+ - Fix GUI and command-line conflicts on Linux.  As an interim solution, now, on Linux:
+    - The command line can be used to start a background process which performs
+      logging without requiring a GUI, for example on a headless machine, but
+    - Starting the GUI stops the background process and instead starts logging
+      from inside the GUI
+    - Stopping the GUI stops logging, and the user needs to restart logging 
+      from the command line.
 
 ## Version 10.16
 
