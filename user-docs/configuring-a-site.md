@@ -36,45 +36,69 @@ This is an outline of the steps required to set up `radon-monitor` on a new comp
     * Go to `File → Load Configuration` and choose `c:\data\rdm-config.ini`
         * (expect logging to begin now)
     * Go to `View → Calibration` and enable scheduled calibrations
-7. Ensure RDM is set as a startup program (TODO: check this works)
+7. Ensure RDM is set as a startup program
 
 
-## Linux
-    * `TODO:` write some instructions.  Basically, one approach, is:
-        1. create a new user profile for the logging the radon data, say `/home/radonmonitor`, or `/home/atmdata` if the user will be controlling a 
-        2. install a miniconda Python environment for that user (one which activates)
-        3. install the radon-monitor CLI into that environment using `pip install`
-        4. use cron to schedule calibrations/backgrounds
-        4. TODO: set up RDM as a system service
+## Linux, using a virtual environment, including Raspberry Pi
 
-## Linux, Raspberry Pi
+Assuming that there is a compatible version of Python installed on the system, it should be fine to use a [virtual environment](https://docs.python.org/3/library/venv.html).  Currently, this is Python version 3.11 or greater.
 
-TODO: fixme
+If your system has an older version of Python installed, you could instead install a conda environment and then follow these steps from 2 onwards.
 
-If we're using a Raspberry Pi, we're likely to have a dedicated machine. In this case, it's probably fine to use the system installation of Python.
+These instructions assume the following path names:
+ - `/home/radon-logger` is the user's home directory
+ - `/home/radon-logger/venv-rdm` is the Python virtual environment created during installation
+ - `/home/radon-logger/data` is for the configuration file and output data
+ - `/home/radon-logger/data`
 
-1. Perform a clean install of the RPi operating system
-2. Install the radon-monitor command line client:
-    `pip install --user git+https://github.com/anstoradonlab/radon-monitor.git`
-3. Install the Labjack exodriver:
+1. Initialise and then activate a new virtual environment:  
+```sh
+   python3 -m venv ~/venv-rdm
+   source ~/venv-rdm/bin/activate
+```
+
+2. Install the radon-monitor command line client and GUI.  Replace the tag (`@10.17.0`) with the version you want to install:  
+```sh
+python -m pip install  "ansto_radon_monitor[gui] @ git+https://github.com/anstoradonlab/radon-monitor.git@v10.17.0"
+```
+
+4. Install the Labjack exodriver.  For Ubuntu or Raspberry Pi systems, execute these commands, or [read the full installation instructions](https://github.com/labjack/exodriver/blob/master/INSTALL.Linux):
 ```sh
 sudo apt install build-essential libusb-1.0-0-dev
 git clone https://github.com/labjack/exodriver.git
 cd exodriver
 sudo ./install.sh
 ```
-4. create a configuration file
-5. integrate with the system (cheat by using cron jobs)
-6. When new versions of `radon-monitor` get released, upgrade using this command:
-   `pip install --user --upgrade git+https://github.com/anstoradonlab/radon-monitor.git`
+
+3. You should now be able to test that the installation worked by running:  
+    `~/venv-rdm/bin/radon-monitor -h`
+
+4. At this point, the installation is complete.  You can now create a configuration file.  
+
+5. If you are not using the GUI to schedule tasks, you can integrate the command-line controls with the system.  We can cheat by using cron jobs, for example run `crontab -e` and then set up something like this:
+
+```bash
+# Try to start logging every 10 minutes.  This will fail immediately if there is
+# already a version of radon-monitor running, so it is a quick-and-dirty way to
+# keep the logging process going.  It would be more appropriate to do this
+# with a system service, for example a .service file.
+*/10 * * * * /home/radon-logger/bin/radon-monitor -c /home/radon-logger/data/richmond-config.ini run
+# Start running a calibration sequence at 5am on the 10th of each month
+0 5 10 * * /home/radon-logger/bin/radon-monitor -c /home/radon-logger/data/richmond-config.ini calibrate
+# Start running a background sequence at 0000 on the 20th of every third month
+0 0 20 */3 * /home/radon-logger/bin/radon-monitor -c /home/radon-logger/data/richmond-config.ini background
+
+```
+6. When new versions of `radon-monitor` get released, upgrade using this command (replacing `X.xx.x` with the current version):
+   `source ~/venv-rdm
+   `python -m pip install --upgrade  "ansto_radon_monitor[gui] @ git+https://github.com/anstoradonlab/radon-monitor.git@vX.xx.x"`
 
 
-## Basic Troubleshooting ideas
+## Troubleshooting ideas
 
 * Some odd problems occur if the logger is not set to UTC.  If you know that the clock on the PC is set correctly, you can force the logger to sync to the PC clock using `Device Configuration Utility` or by using the `View → System Information` dialog in RDM.
 * Data locations may need to exist and be writable by the RDM user
 * Sometimes we have seen a crash where the COM port has stayed locked, meaning that RDM is unable to access it after it is reopened.  Try rebooting the computer.
-* Under the `View → System Information`
 
 
 ## Appendix 1: Sample configuration file
@@ -226,12 +250,15 @@ All are free to use.  With the exception of Device Configuration Utility, all of
 ### Campbell Scientific's free logger communications software
 
 Device Configuration Utility:
-https://www.campbellsci.com.au/devconfig 
+https://www.campbellsci.com/downloads/device-configuration-utility
+
+PC400 (optional):
+https://www.campbellsci.com/downloads/pc400
 
 ### SQLite database viewer
 
 DB Browser for SQLite:
-https://download.sqlitebrowser.org/DB.Browser.for.SQLite-3.12.2-win64.msi
+https://sqlitebrowser.org/dl/
 
 
 ### A reasonable text editor
@@ -249,7 +276,7 @@ Microsoft dotnet: https://dotnet.microsoft.com/en-us/download/dotnet
 Compatible versions: Bürkert Communicator 7.0.4
 Dot Net: .NET Desktop Runtime 7.0.0 ([direct link](https://dotnet.microsoft.com/en-us/download/dotnet/thank-you/runtime-desktop-7.0.0-windows-x64-installer))
 
-### Some kind of period backup solution (optional)
+### Some kind of periodic backup solution (optional)
 
 WinSCP: https://winscp.net/ with a guide at https://winscp.net/eng/docs/guide_schedule
 
@@ -262,8 +289,3 @@ For cloud storage, try rclone: https://rclone.org/
 LibreOffice:
 https://www.libreoffice.org/download/download/?type=win-x86&version=7.3.1&lang=en-US
 
-
-### Remote desktop (optional)
-
-RustDesk:
-https://rustdesk.com/
