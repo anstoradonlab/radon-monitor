@@ -51,9 +51,14 @@ These instructions assume the following path names:
  - `/home/radon-logger/data` is for the configuration file and output data
  - `/home/radon-logger/data`
 
-1. Initialise and then activate a new virtual environment:  
+0.  Install pre-requesites (prefer system packages over pypi/pip-installed packages)
 ```sh
-   python3 -m venv ~/venv-rdm
+sudo apt install python3-pyqt5 python3-numpy python3-msgpack python3-gevent
+```
+
+2. Initialise and then activate a new virtual environment:  
+```sh
+   python3 -m venv --system-site-packages ~/venv-rdm
    source ~/venv-rdm/bin/activate
 ```
 
