@@ -1,5 +1,11 @@
 # Changelog
 
+## Version 10.17.1
+
+8 November 2024
+
+ - Fix a problem with the sensitivity sweep dialog
+
 ## Version 10.17
 
 16 October 2024
