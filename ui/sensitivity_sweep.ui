@@ -60,7 +60,7 @@
            <string>V</string>
           </property>
           <property name="minimum">
-           <number>500</number>
+           <number>100</number>
           </property>
           <property name="maximum">
            <number>1500</number>
