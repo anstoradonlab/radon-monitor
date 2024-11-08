@@ -138,7 +138,7 @@ class SensitivitySweepForm(QtWidgets.QWidget, Ui_SensitivitySweepForm):
             n = self._samples_at_voltage[target]
             n += 1
             self._samples_at_voltage[target] = n
-            self.progressBar.setValue(float(100.0 * n / self.npoints))
+            self.progressBar.setValue(int(100.0 * n / self.npoints))
             self.sweep_data.append(row)
             self.instructionLabel.setText("")
             self.update_plot()
@@ -221,7 +221,7 @@ class SensitivitySweepForm(QtWidgets.QWidget, Ui_SensitivitySweepForm):
             self._s2.append(s)
 
     def finish_sweep(self):
-        self.progressBar.setValue(0.0)
+        self.progressBar.setValue(0)
         self.onStop()
 
     def hideEvent(self, event):
