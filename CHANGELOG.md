@@ -1,5 +1,10 @@
 # Changelog
 
+## Version 10.17.2
+
+ - Increase the amount of log messages during datalogger connection
+ - Add an option to report pakbus activity
+
 ## Version 10.17.1
 
 8 November 2024
