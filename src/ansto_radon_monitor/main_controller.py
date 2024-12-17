@@ -83,7 +83,7 @@ def initialize(configuration: Configuration, mode: str = "thread"):
         #    register_sigint_handler(controller.shutdown_and_exit)
         register_sigint_handler(controller.shutdown_and_exit)
         # take over logging
-        setup_logging(configuration.loglevel, configuration.logfile)
+        setup_logging(configuration.loglevel, configuration.logfile, configuration.log_pakbus_activity)
         s.run()
 
     if mode == "foreground":

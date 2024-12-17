@@ -514,7 +514,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.config = config
 
         try:
-            setup_logging(config.loglevel, config.logfile)
+            setup_logging(config.loglevel, config.logfile, log_pakbus_activity=config.log_pakbus_activity)
         except Exception as ex:
             _logger.critical(f"Unable to initialise logging to {config.logfile} because of {ex}: {traceback.format_exc()}")
             return

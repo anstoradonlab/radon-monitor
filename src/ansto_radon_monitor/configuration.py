@@ -118,6 +118,7 @@ class Configuration:
 
     foreground: bool = False
     loglevel: LogLevel = LogLevel(logging.ERROR)
+    log_pakbus_activity: bool = False
     logfile: typing.Optional[pathlib.Path] = None
     pid_file: pathlib.Path = pathlib.Path("/tmp/ansto_radon_monitor.pid")
     data_dir: pathlib.Path = pathlib.Path(".", "data").absolute()
@@ -478,7 +479,7 @@ if __name__ == "__main__":
     assert config.loglevel == logging.ERROR
 
 
-def setup_logging(loglevel=logging.DEBUG, logfn=None):
+def setup_logging(loglevel=logging.DEBUG, logfn=None, log_pakbus_activity=False):
     """Setup basic logging
 
     Args:
@@ -486,9 +487,15 @@ def setup_logging(loglevel=logging.DEBUG, logfn=None):
         logfn (str): file name to log messages to (if None, don't log messages to file)
 
     """
+
+    if log_pakbus_activity:
+        pakbus_loglevel = loglevel
+    else:
+        pakbus_loglevel = logging.CRITICAL
+
     # exclude information messages for Pylink and Pycr1000
     for mod in ["pycampbellcr1000", "pylink"]:
-        logging.getLogger(mod).setLevel(logging.CRITICAL)
+        logging.getLogger(mod).setLevel(pakbus_loglevel)
 
     rootlogger = logging.getLogger()
     rootlogger.setLevel(loglevel)

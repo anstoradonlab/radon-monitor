@@ -96,7 +96,7 @@ def main(args):
     # inital logging setup so that we can see messages from config parser
     setup_logging(logging.DEBUG)
     configuration, cmdline_args = config_from_commandline(args)
-    setup_logging(configuration.loglevel)
+    setup_logging(configuration.loglevel, log_pakbus_activity=configuration.log_pakbus_activity)
     _logger.debug("Setting up...")
 
     if cmdline_args.action == "run":

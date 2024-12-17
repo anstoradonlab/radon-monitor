@@ -1212,6 +1212,7 @@ class DataLoggerThread(DataThread):
         )
         ser.port = detector_config.serial_port
         self._datalogger = CR1000(ser)
+        _logger.info(f"Found datalogger on {detector_config.serial_port}")
         # use a fairly short timeout during the connection process (because one of the steps involves
         # reading from the port until timeout to clear the buffers) but then change the timeout
         # to a larger value once connected
@@ -1336,6 +1337,7 @@ class DataLoggerThread(DataThread):
         try:
             with self._lock:
                 self.status["link"] = "connecting to datalogger"
+                _logger.info("Init. datalogger...")
                 try:
                     self._connect(detector_config)
                     # on success, reset reconnect delay
@@ -1356,6 +1358,7 @@ class DataLoggerThread(DataThread):
                     self._reconnect_delay = min(self._reconnect_delay * 2, 60*30)
                     return
 
+                _logger.info("Reading datalogger tables...")
                 # connect can take a long time, but this is Ok
                 self._tolerate_hang = True
                 self.update_heartbeat_time()
@@ -1368,6 +1371,7 @@ class DataLoggerThread(DataThread):
                 # Filter the tables - only include the ones which are useful
                 self.tables = [itm for itm in self.tables if itm in self._tables_to_use]
 
+                _logger.info("Reading datalogger table defintions...")
                 # the consequences of these statements failing are incorrect display, but they'll
                 # have no impact on the data as it is logged, hence not a critical failure. 
                 try:
