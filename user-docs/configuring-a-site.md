@@ -8,7 +8,7 @@ This is an outline of the steps required to set up `radon-monitor` on a new comp
 ### Entirely new computer
 
 1. Install the ancillary software listed below
-2. Install the Radon Monitor GUI from https://github.com/anstoradonlab/radon-monitor-gui (look for releases to find a Windows installer) 
+2. Install Radon Detector Monitor (RDM) from https://github.com/anstoradonlab/radon-monitor (look for releases to find a Windows installer) 
 3. Create the directory `c:\data`
 4. Choose a site name, and a name for each radon detector.  Make sure that both the site name and detector name will uniquely identify the data stream in the event that data from many detectors is merged together.  Also, choose names which can be used as file names without surprises (use no whitespace, or special characters).  If there is only one radon detector at the site, it is Ok for both the site and detector name to be the same, e.g. `GunnPoint`. A more complex example is a site with a tower.  This would be Ok for Lucas Heights with radon detectors drawing air from 2m and 50m AGL:
     * site: LucasHeights
@@ -131,6 +131,15 @@ loglevel= INFO
 # If True, this option adds an "ApproxRadon" to the legacy format
 # csv output (optional, True by default)
 # legacy_file_write_approx_radon=True
+#
+# Network Time Protocol - check clock against this server
+# Note: This is just a check, RDM will not update the computer clock
+ntp_server=pool.ntp.org
+#
+# If the datalogger clock is set to anything other than UTC
+# then set this to the correct offset (in hours).  It is 
+# recommended to leave the datalogger set to UTC whenever possible
+# datalogger_time_offset=0.0
 
 # detector_kind sets the type of radon detector.  Options are:
 #  "L1500" - standard 1500 litre detector
@@ -140,6 +149,10 @@ loglevel= INFO
 [detector1]
 kind=L1500
 serial_port=COM3
+# Default baudrate is 9600.  If you have a short cable, 
+# and good connect, this can be set to 115200
+# baudrate=9600
+#
 # suggested template: 
 # [SITECODE]
 # or (if there is more than one detector here)
@@ -147,6 +160,11 @@ serial_port=COM3
 name=TEST
 csv_file_pattern=height02/{NAME}{MONTH}{YEAR}.CSV
 datalogger_serial=-1
+# Metadata - setting this correctly is helpful for automated
+# data processing later
+volume_m3=1.5
+thoron_delay_volume_m3=0.2
+thoron_delay_number_of_tanks=2
 
 # add more detectors like this
 # [detector2]
