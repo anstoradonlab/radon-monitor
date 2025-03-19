@@ -1,0 +1,17 @@
+{
+    "creators": [
+        {
+            "orcid": "0000-0003-1135-1810",
+            "affiliation": "Australian Nuclear Science and Technology Organisation",
+            "name": "Griffiths, Alan"
+        }
+        
+    ],
+
+    "license": "GPL-3.0",
+
+    "title": "Radon Detector Monitor (RDM):  command-line and GUI for control and logging ANSTO radon detectors",
+
+    "keywords": ["Radon-222"]
+
+}
