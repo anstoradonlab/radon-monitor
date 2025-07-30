@@ -75,11 +75,13 @@ class CAndBForm(QtWidgets.QWidget, Ui_CAndBForm):
         container = self.cal_bg_start_times_layout
         while len(container) > 0:
             container.removeWidget(container.children[0])
+        self._tabwidget = QtWidgets.QTabWidget()
+        container.addWidget(self._tabwidget)
         for ii, detector_config in enumerate(config.detectors):
             widget = CalBgStartWidget(
                 sequence_number=ii + 1, detector_name=detector_config.name
             )
-            container.addWidget(widget)
+            self._tabwidget.addTab(widget, f"Detector {ii + 1}")
             self._start_time_widgets.append(widget)
 
     def _setup_calibration_options(self):
