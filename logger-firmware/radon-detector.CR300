@@ -127,12 +127,13 @@ EndSub
 ' Convert from mV to standard litres per minute
 ' Assumptions:
 '   * device transmits analog signal (0-5000 mV)
+'   * 1/2 voltage divider is installed, so effective range at datalogger is 0-2500 mV
 '   * Configured flow range is flowMin - flowMax (set in subroutine)
 Sub Convert_mV_to_slpm(signal_mv, flow_slpm)
   Dim mvMin, mvMax, flowMin, flowMax, delta_mv, delta_slpm
   ' min/max signal in mV
   mvMin = 0
-  mvMax = 5000
+  mvMax = 2500
   ' min/max presure in Pa
   flowMin= 0
   flowMax = 110
@@ -164,7 +165,7 @@ BeginProg
     ' Read flow rate through head #1 (cal assumes R=120ohms)
     VoltSe(InFlow,1,mV2500,5,False,0,_60Hz,VC_SLOPE,VC_OFFSET)
     ' Burkert type 8745 mass flow sensor
-    VoltSe(Gas_meter, 1,mv2500, 3,False,0,_60Hz,1,0)
+    VoltSe(Gas_meter, 1,mv2500, 6,False,0,_60Hz,1,0)
     Convert_mV_to_slpm(Gas_meter, ExFlow) 		
     
     'SDI-12, digital sensors
