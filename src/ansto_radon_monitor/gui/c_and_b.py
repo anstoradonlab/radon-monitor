@@ -1,4 +1,5 @@
 import datetime
+from dateutil.relativedelta import relativedelta
 import logging
 import math
 import time
@@ -36,6 +37,8 @@ class CAndBForm(QtWidgets.QWidget, Ui_CAndBForm):
             self.flushSpinBox,
             self.injectSpinBox,
             self.backgroundSpinBox,
+            self.calUnitsComboBox,
+            self.backgroundUnitsComboBox,
         ]
         self._controls_to_disable_during_onceoff = [
             self.operationTypeComboBox,
@@ -100,16 +103,22 @@ class CAndBForm(QtWidgets.QWidget, Ui_CAndBForm):
 
         combobox.addItems(operations)
 
+        cb_list = [self.calUnitsComboBox, self.backgroundUnitsComboBox]
+        unit_opts = ["Days", "Months"]
+        for combobox in cb_list:
+            combobox.clear()
+            combobox.addItems(unit_opts)
+
     def _read_gui_state(self):
         """
         Read data from GUI into a dict
         """
         # TODO: write this and use it instead of reading from each widget
         #       individually!
-        background_interval_days = int(self.backgroundIntervalSpinBox.value())
-        bg_interval = datetime.timedelta(days=background_interval_days)
-        cal_interval_days = int(self.calibrationIntervalSpinBox.value())
-        cal_interval = datetime.timedelta(days=cal_interval_days)
+        background_interval_raw = int(self.backgroundIntervalSpinBox.value())
+        bg_interval = datetime.timedelta(days=background_interval_raw)
+        cal_interval_raw = int(self.calibrationIntervalSpinBox.value())
+        cal_interval = datetime.timedelta(days=cal_interval_raw)
 
     def connect_signals(self):
         self.enableScheduleButton.clicked.connect(self.on_enable_schedule_clicked)
@@ -122,24 +131,36 @@ class CAndBForm(QtWidgets.QWidget, Ui_CAndBForm):
             self.on_cal_interval_changed
         )
 
+        self.backgroundUnitsComboBox.currentTextChanged.connect(
+            self.on_units_changed
+        )
+        self.calUnitsComboBox.currentTextChanged.connect(
+            self.on_units_changed
+        )
+
         # TODO: consider using a single timer in mainwindow
         self.redraw_timer = QtCore.QTimer()
         self.redraw_timer.setInterval(1000)
         self.redraw_timer.timeout.connect(self.update_displays)
         self.redraw_timer.start()
 
+    def on_units_changed(self, s):
+        self.backgroundUnitsComboBox.setCurrentText(s)
+        self.calUnitsComboBox.setCurrentText(s)
+
+
     def on_cal_interval_changed(self, s):
         """Keep the background interval set to a constant multiple of the cal interval"""
-        background_interval_days = int(self.backgroundIntervalSpinBox.value())
-        cal_interval_days = int(self.calibrationIntervalSpinBox.value())
+        background_interval_raw = int(self.backgroundIntervalSpinBox.value())
+        cal_interval_raw = int(self.calibrationIntervalSpinBox.value())
 
-        if cal_interval_days == 0:
-            cal_interval_days = 1
-        # round-off to multiple of cal_interval_days
-        v = int(round(background_interval_days / cal_interval_days)) * cal_interval_days
+        if cal_interval_raw == 0:
+            cal_interval_raw = 1
+        # round-off to multiple of cal_interval_raw
+        v = int(round(background_interval_raw / cal_interval_raw)) * cal_interval_raw
         self.backgroundIntervalSpinBox.setSingleStep(1)
         self.backgroundIntervalSpinBox.setValue(v)
-        self.backgroundIntervalSpinBox.setSingleStep(cal_interval_days)
+        self.backgroundIntervalSpinBox.setSingleStep(cal_interval_raw)
 
     def onStartStop(self):
         # read some state from the gui
@@ -220,14 +241,23 @@ class CAndBForm(QtWidgets.QWidget, Ui_CAndBForm):
 
             bg_times = [itm.bg_start_time for itm in self._start_time_widgets]
             cal_times = [itm.cal_start_time for itm in self._start_time_widgets]
-            background_interval_days = int(self.backgroundIntervalSpinBox.value())
-            background_interval = datetime.timedelta(days=background_interval_days)
-            cal_interval_days = int(self.calibrationIntervalSpinBox.value())
-            cal_interval = datetime.timedelta(days=cal_interval_days)
+            background_interval_raw = int(self.backgroundIntervalSpinBox.value())
+            units = self.calUnitsComboBox.currentText()
+            if units == "Days":
+                background_interval = datetime.timedelta(days=background_interval_raw)
+            elif units == "Months":
+                background_interval = relativedelta(months=background_interval_raw)
+            
+            cal_interval_raw = int(self.calibrationIntervalSpinBox.value())
+            units = self.calUnitsComboBox.currentText()
+            if units == "Days":
+                cal_interval = datetime.timedelta(days=cal_interval_raw)
+            elif units == "Months":
+                cal_interval = relativedelta(months=cal_interval_raw)
 
             if ic is not None:
                 for ii, (t0_background, t0_cal) in enumerate(zip(bg_times, cal_times)):
-                    if cal_interval_days > 0:
+                    if cal_interval_raw > 0:
                         ic.schedule_recurring_calibration(
                             flush_duration,
                             inject_duration,
@@ -235,7 +265,7 @@ class CAndBForm(QtWidgets.QWidget, Ui_CAndBForm):
                             cal_interval,
                             detector_idx=ii,
                         )
-                    if background_interval_days > 0:
+                    if background_interval_raw > 0:
                         ic.schedule_recurring_background(
                             background_duration,
                             t0_background,
@@ -372,10 +402,18 @@ class CAndBForm(QtWidgets.QWidget, Ui_CAndBForm):
         cal_times = [itm.cal_start_time for itm in self._start_time_widgets]
         qs.setValue("t0_cal", cal_times)
 
-        background_interval_days = int(self.backgroundIntervalSpinBox.value())
-        qs.setValue("background_interval", background_interval_days*3600*24)
-        cal_interval_days = int(self.calibrationIntervalSpinBox.value())
-        qs.setValue("cal_interval", cal_interval_days*3600*24)
+        # the conversion factor is here because RDM, prior to July 2025, stored
+        # the calibration interval in QSettings in units of seconds but displayed
+        # in the GUI in units of days.  Now the units are user-selectable,
+        # but default to days.  We keep the conversion factor so that
+        # we can read back settings from old versions.
+        background_interval_raw = int(self.backgroundIntervalSpinBox.value())
+        qs.setValue("background_interval", background_interval_raw*3600*24)
+        cal_interval_raw = int(self.calibrationIntervalSpinBox.value())
+        qs.setValue("cal_interval", cal_interval_raw*3600*24)
+
+        units = self.calUnitsComboBox.currentText()
+        qs.setValue("cal_bg_interval_units", units)
 
         # schedule enabled/disabled
         qs.setValue("schedule_enabled", self.enableScheduleButton.isChecked())
@@ -428,6 +466,19 @@ class CAndBForm(QtWidgets.QWidget, Ui_CAndBForm):
                     _logger.error(
                         f"Unable to read background start time from QSettings due to {e}.  Detector {ii+1}, bg_times: {bg_times}"
                     )
+        # Restore units.  These were introduced in July 2025, previouly the GUI
+        # only had the option of "Days", so use "Days" if the key is not found
+        try:
+            units = qs.value("cal_bg_interval_units")
+        except Exception as ex:
+            units = "Days"
+            _logger.info(
+                        f"Unable to read calibration/background interval units from QSettings due to error: {e}.  Using default (Days)"
+                    )
+
+        self.calUnitsComboBox.setCurrentText(units)
+        self.backgroundUnitsComboBox.setCurrentText(units)
+
         schedule_state = qs.value("schedule_enabled")
         if schedule_state is not None:
             # instead of using self.enableScheduleButton.setChecked(schedule_state)
