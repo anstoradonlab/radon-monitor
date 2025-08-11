@@ -164,16 +164,16 @@ BeginProg
     ' Read flow rate through head #1 (cal assumes R=120ohms)
     VoltSe(InFlow,1,mV2500,5,False,0,_60Hz,VC_SLOPE,VC_OFFSET)
     ' Burkert type 8745 mass flow sensor
-    VoltSe(Gas_meter, 1,mV5000, 3,False,0,_60Hz,1,0)
+    VoltSe(Gas_meter, 1,mv2500, 3,False,0,_60Hz,1,0)
     Convert_mV_to_slpm(Gas_meter, ExFlow) 		
     
     'SDI-12, digital sensors
     'Barometric Pressure Sensor measurements 'BV_BP', 'BV_Temp', and 
     ''BV_Qual'
-    SDI12Recorder(BaroVUE(),C1,"1","M!",1,0,-1)
+    SDI12Recorder(BaroVUE(),C1,"1","M!",1,0)
     'HygroVUE5/HygroVUE10 Digital Temperature & Relative Humidity Sensor 
     'AirTC' and 'RH'
-    SDI12Recorder(TRHData(),C1,"0","M!",1,0,-1)
+    SDI12Recorder(TRHData(),C1,"0","M!",1,0)
 
     CallTable Results
     CallTable RTV
