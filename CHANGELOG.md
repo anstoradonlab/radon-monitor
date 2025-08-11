@@ -1,5 +1,13 @@
 # Changelog
 
+## Version 10.18
+
+11 August 2025
+
+ - Better handling for the new external flow rate sensor in plots
+ - Add the option to perform calibration / backgrounds on a monthly
+   schedule
+
 ## Version 10.17.2
 
  - Increase the amount of log messages during datalogger connection
