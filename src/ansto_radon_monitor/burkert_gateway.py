@@ -326,15 +326,19 @@ class BurkertGateway(CalboxDevice):
         """Inject radon from source
         (if we're in BG mode then switch out of it)"""
         assert detector_idx == 0 or detector_idx == 1 or detector_idx == 2
+        # in most cases, we'll want to close the flush valve
+        flush_state = False
         # choose the valve and bg flag matching this detector
         valve_idx = 2 + detector_idx
         # experimental option - the third detector (idx 2) is on the 8th DIO (index 7)
+        # and it is piggybacked onto the flush line (so flush needs to be open too)
         if detector_idx == 2:
             valve_idx = 7
+            flush_state = True
         bg_idx = 4 + detector_idx
         flags = self._read_flags()
         flags[0] = True
-        flags[1] = False
+        flags[1] = flush_state
         flags[2] = False
         flags[3] = False
         flags[valve_idx] = True # this is valve 2 or valve 3
