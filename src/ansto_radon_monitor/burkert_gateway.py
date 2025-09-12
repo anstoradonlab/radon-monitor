@@ -328,6 +328,9 @@ class BurkertGateway(CalboxDevice):
         assert detector_idx == 0 or detector_idx == 1
         # choose the valve and bg flag matching this detector
         valve_idx = 2 + detector_idx
+        # experimental option - the third detector (idx 2) is on the 8th DIO (index 7)
+        if detector_idx == 2:
+            valve_idx = 7
         bg_idx = 4 + detector_idx
         flags = self._read_flags()
         flags[0] = True
@@ -336,7 +339,9 @@ class BurkertGateway(CalboxDevice):
         flags[3] = False
         flags[valve_idx] = True # this is valve 2 or valve 3
         # make sure this detector is switched out of background
-        flags[bg_idx] = False
+        # but only if we're not using the experimental three detector setup
+        if not detector_idx == 2:
+            flags[bg_idx] = False
         self._set_flags(flags)
         self._set_mfc_flowrate(self._mfc_setpoint_inject)
 
@@ -349,6 +354,11 @@ class BurkertGateway(CalboxDevice):
         flags[1] = False
         flags[2] = False
         flags[3] = False
+        if self._option_2b:
+            # these are officially unused, but on occasion are used for experiments
+            # so it makes sense to reset them here
+            flags[6] = False
+            flags[7] = False
         self._set_flags(flags)
         self._set_mfc_flowrate(0.0)
     
