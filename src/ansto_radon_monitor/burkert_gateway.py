@@ -325,7 +325,7 @@ class BurkertGateway(CalboxDevice):
     def inject(self, detector_idx: int = 0) -> None:
         """Inject radon from source
         (if we're in BG mode then switch out of it)"""
-        assert detector_idx == 0 or detector_idx == 1
+        assert detector_idx == 0 or detector_idx == 1 or detector_idx == 2
         # choose the valve and bg flag matching this detector
         valve_idx = 2 + detector_idx
         # experimental option - the third detector (idx 2) is on the 8th DIO (index 7)
