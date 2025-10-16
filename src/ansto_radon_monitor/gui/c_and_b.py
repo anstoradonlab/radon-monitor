@@ -104,10 +104,12 @@ class CAndBForm(QtWidgets.QWidget, Ui_CAndBForm):
         combobox.addItems(operations)
 
         cb_list = [self.calUnitsComboBox, self.backgroundUnitsComboBox]
-        unit_opts = ["Days", "Months"]
+        unit_opts = ["Hours", "Days", "Months"]
         for combobox in cb_list:
             combobox.clear()
             combobox.addItems(unit_opts)
+            # set to "Days" by default
+            combobox.setCurrentIndex(1)
 
     def _read_gui_state(self):
         """
@@ -115,10 +117,7 @@ class CAndBForm(QtWidgets.QWidget, Ui_CAndBForm):
         """
         # TODO: write this and use it instead of reading from each widget
         #       individually!
-        background_interval_raw = int(self.backgroundIntervalSpinBox.value())
-        bg_interval = datetime.timedelta(days=background_interval_raw)
-        cal_interval_raw = int(self.calibrationIntervalSpinBox.value())
-        cal_interval = datetime.timedelta(days=cal_interval_raw)
+        raise NotImplementedError()
 
     def connect_signals(self):
         self.enableScheduleButton.clicked.connect(self.on_enable_schedule_clicked)
@@ -243,17 +242,29 @@ class CAndBForm(QtWidgets.QWidget, Ui_CAndBForm):
             cal_times = [itm.cal_start_time for itm in self._start_time_widgets]
             background_interval_raw = int(self.backgroundIntervalSpinBox.value())
             units = self.calUnitsComboBox.currentText()
-            if units == "Days":
+            if units == "Minutes":
+                background_interval = datetime.timedelta(minutes=background_interval_raw)
+            elif units == "Hours":
+                background_interval = datetime.timedelta(hours=background_interval_raw)
+            elif units == "Days":
                 background_interval = datetime.timedelta(days=background_interval_raw)
             elif units == "Months":
                 background_interval = relativedelta(months=background_interval_raw)
+            else:
+                raise ValueError(f"Unknown unit: {units}")
             
             cal_interval_raw = int(self.calibrationIntervalSpinBox.value())
             units = self.calUnitsComboBox.currentText()
-            if units == "Days":
+            if units == "Minutes":
+                cal_interval = datetime.timedelta(minutes=cal_interval_raw)
+            elif units == "Hours":
+                cal_interval = datetime.timedelta(hours=cal_interval_raw)
+            elif units == "Days":
                 cal_interval = datetime.timedelta(days=cal_interval_raw)
             elif units == "Months":
                 cal_interval = relativedelta(months=cal_interval_raw)
+            else:
+                raise ValueError(f"Unknown unit: {units}")
 
             if ic is not None:
                 for ii, (t0_background, t0_cal) in enumerate(zip(bg_times, cal_times)):

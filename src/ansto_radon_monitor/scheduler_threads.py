@@ -542,7 +542,7 @@ class CalibrationUnitThread(DataThread):
 
 
     @task_description("Calibration unit: flush source")
-    def set_flush_state(self):
+    def set_flush_state(self, log_data=None):
         try:
             self._device.flush()
             self._datastore.add_log_message(
@@ -554,6 +554,15 @@ class CalibrationUnitThread(DataThread):
                 f" because of error: {ex}.  Attempting to reconnect and reset in 10sec."
             )
             self._schedule_connection(self._init_labjack_id, self._init_serialNumber)
+            return
+
+        if log_data is not None:
+            json_log_data = json.dumps(log_data, default=str)
+            detector_name = log_data.get("DetectorName", None)
+            self._datastore.add_log_message(
+                "CalibrationEventSummary", json_log_data, detector_name=detector_name
+            )
+
 
     def _run_or_reset(self, func, description, argument=()):
         """Run a function, but on failure log the exception and attempt to reconnect to the logger"""
@@ -670,7 +679,7 @@ class CalibrationUnitThread(DataThread):
             )
 
     def run_calibration(
-        self, flush_duration, inject_duration, start_time=None, detector_idx=0
+        self, flush_duration, inject_duration, start_time=None, resume_flushing_after_inject=False, detector_idx=0
     ):
         """Run the calibration sequence - flush source, inject source
 
@@ -683,6 +692,9 @@ class CalibrationUnitThread(DataThread):
         start_time : datetime.datetie or None, optional
             time when flushing is due to start (UTC), or None (which means to start
             immediately), by default None
+        resume_flushing_after_inject : boolean, optional (default False)
+            if True then switch back into flush mode at the end of the calibration
+            instead of switching the calibration unit to idle
         detector_idx : int, default 0
             The detector index to target (always 0 for a one-detector setup)
         """
@@ -773,12 +785,21 @@ class CalibrationUnitThread(DataThread):
                 "SourceActivity": self._radon_source_activity_bq,
             }
 
-            self._scheduler.enter(
-                delay=delay_inject_stop,
-                priority=p,
-                action=self.set_default_state,
-                kwargs={"log_data": calibration_summary},
-            )
+            if resume_flushing_after_inject:
+                self._scheduler.enter(
+                    delay=delay_inject_stop,
+                    priority=p,
+                    action=self.set_flush_state,
+                    kwargs={"log_data": calibration_summary},
+                )
+
+            else:
+                self._scheduler.enter(
+                    delay=delay_inject_stop,
+                    priority=p,
+                    action=self.set_default_state,
+                    kwargs={"log_data": calibration_summary},
+                )
 
             self.state_changed.set()
 
@@ -880,34 +901,46 @@ class CalibrationUnitThread(DataThread):
         interval: datetime.timedelta,
         detector_idx: int = 0,
     ):
+        # special case: the user is running back-to-back calibration cycles, i.e.
+        # flush - inject - flush - inject - ...
+        resume_flushing_after_inject = (interval == datetime.timedelta(seconds=flush_duration) + datetime.timedelta(seconds=inject_duration))
+
+        # presently, it is assumed that this function will always be called ahead of when
+        # the calibration is needed (so there is no wiggle room) but we are being explicit
+        # about this
+        wiggle_room = datetime.timedelta(seconds=0)
         with self._lock:
-            # ensure first_start_time is in the future
+            # ensure first_start_time is in the future (with some wiggle room included
+            # so that the function still works if it is called *at* the same time
+            # as the calibration cycle is intended to begin)
             now = datetime.datetime.now(datetime.timezone.utc)
             ii = 0
-            maxiter = 365 * 2050
-            while first_start_time < now:
+            maxiter = 365 * 2050 * 24 * 60
+            while first_start_time < now + wiggle_room:
                 first_start_time += interval
                 ii += 1
                 # try not to hang for ever on bad inputs
                 if ii > maxiter:
                     _logger.error(
-                        "Unable to schedule recurring calibration (inputs were: flush_duration={inject_duration}, flush_duration={inject_duration}, first_start_time={first_start_time}, interval={interval}"
+                        f"Unable to schedule recurring calibration (inputs were: flush_duration={inject_duration}, flush_duration={inject_duration}, first_start_time={first_start_time}, interval={interval}"
                     )
                     return
             self.run_calibration(
                 flush_duration,
                 inject_duration,
                 start_time=first_start_time,
+                resume_flushing_after_inject=resume_flushing_after_inject,
                 detector_idx=detector_idx,
-            )
-            _logger.info(
-                f"Next scheduled calibration (detector {detector_idx+1}, flush: {flush_duration/3600.0}, inject: {inject_duration/3600.} hours) scheduled for {first_start_time} UTC."
             )
 
             # After the next calibration has completed, schedule the next one
             sched_time = first_start_time + datetime.timedelta(
                 seconds=int(flush_duration + inject_duration)
             )
+            if resume_flushing_after_inject:
+                # running back-to-back calibrations, so add the next calibration
+                # to the scheduler earlier - so that we don't miss the start.
+                sched_time -= datetime.timedelta(seconds=int(10))
             scheduler_delay_seconds = max(
                 0,
                 (
@@ -926,6 +959,7 @@ class CalibrationUnitThread(DataThread):
                     detector_idx,
                 ),
             )
+            self.state_changed.set()
 
     @task_description("Calibration unit: schedule recurring background")
     def schedule_recurring_background(
