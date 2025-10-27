@@ -200,10 +200,32 @@ def parse_config(raw_cfg) -> Configuration:
         if detconfig.check_ntp_sync is None:
             detconfig.check_ntp_sync = ((configuration.ntp_server is not None) and 
                                         (configuration.ntp_server != ""))
+        # Validation: do not accept both a serial port and a network address for the same
+        # detector
         if detconfig.serial_port != "" and detconfig.network_address != "":
             error_message = f"Specifiy either 'serial_port' OR 'network_address' but not both; detector {ii+1} has been configured with 'serial_port = {detconfig.serial_port}' and 'network_address = {detconfig.network_address}'"
             _logger.error(error_message)
             raise RuntimeError(error_message)
+        
+    # Validation - check that no two detectors have the same serial port
+    seen_ports = []
+    seen_ip_addresses = []
+    for ii, detconfig in enumerate(configuration.detectors):
+        if detconfig.serial_port != "":
+            if detconfig.serial_port in seen_ports:
+                error_message = f"Make sure all radon detectors are configured with uniquie serial ports; Detector {ii+1} has 'serial_port {detconfig.serial_port}' but this has already been used for another detector."
+                _logger.error(error_message)
+                raise RuntimeError(error_message)
+            else:
+                seen_ports.append(detconfig.serial_port)
+
+        if detconfig.network_address != "":
+            if detconfig.network_address in seen_ip_addresses:
+                error_message = f"Make sure all radon detectors are configured with uniquie network addresses; Detector {ii+1} has 'network_address {detconfig.network_address}' but this has already been used for another detector."
+                _logger.error(error_message)
+                raise RuntimeError(error_message)
+            else:
+                seen_ip_addresses.append(detconfig.network_address)
 
     return configuration
 
