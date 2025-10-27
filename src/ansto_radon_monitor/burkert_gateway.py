@@ -319,6 +319,8 @@ class BurkertGateway(CalboxDevice):
         flags[1] = True
         flags[2] = False
         flags[3] = False
+        # the experimental, third, detector
+        flags[7] = False
         self._set_flags(flags)
         self._set_mfc_flowrate(self._mfc_setpoint_flush)
 
