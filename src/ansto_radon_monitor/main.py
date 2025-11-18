@@ -126,7 +126,10 @@ def main(args):
         pprint.pprint(control.get_status())
 
     elif cmdline_args.action == "calibrate":
-        control.run_calibration()
+        control.run_calibration(flush_duration=configuration.calbox.flush_duration_sec,
+                                inject_duration=configuration.calbox.inject_duration_sec,)
+    elif cmdline_args.action == "background":
+        control.run_background(duration=configuration.calbox.background_duration_sec)
     else:
         raise NotImplementedError(
             f"Command line action '{cmdline_args.action}' not implemented"
