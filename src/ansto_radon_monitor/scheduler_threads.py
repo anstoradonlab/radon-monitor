@@ -1476,6 +1476,8 @@ class DataLoggerThread(DataThread):
         # import random
         # if random.random() > 0.9:
         #    raise RuntimeError("This is not a real error")
+        msg = f"Tables to process: {self.tables}"
+        _logger.debug(msg)
         for table_name in self.tables:
             destination_table_name = self._rename_table.get(table_name, table_name)
             # it's possible we might like to send data from each datalogger to a separate table.
@@ -1495,6 +1497,8 @@ class DataLoggerThread(DataThread):
             # set stop date to a time in the future (because of the possibility that
             # datalogger timezone doesn't match the computer timezone)
             stop_date = datetime.datetime.utcnow() + datetime.timedelta(days=2)
+            msg = f"table_name = {table_name}, start_date = {update_time}, stop_date = {stop_date}"
+            _logger.debug(msg)
             for data in self._datalogger.get_data_generator(
                 table_name, start_date=update_time, stop_date=stop_date
             ):
@@ -1506,10 +1510,11 @@ class DataLoggerThread(DataThread):
                 # Note: I considered breaking out of the loop early after e.g. 5 seconds so that the other
                 # tables get updated too, but that causes problems in the data archive code
                 self.update_heartbeat_time()
+                total_num_records += len(data)
+                msg = f"Received data ({total_num_records} records) from table {destination_table_name} with start_date = {update_time}."
+                _logger.debug(msg)
+                
                 if len(data) > 0:
-                    total_num_records += len(data)
-                    msg = f"Received data ({total_num_records} records) from table {destination_table_name} with start_date = {update_time}."
-                    _logger.debug(msg)
                     self.status["link"] = msg
 
                     data = [fix_record(itm, time_offset) for itm in data]
