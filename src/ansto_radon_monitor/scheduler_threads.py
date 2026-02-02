@@ -1713,6 +1713,11 @@ class DataLoggerThread(DataThread):
             f"Detector: {self.detectorName}, {pprint.pformat(progstat)}",
             detector_name=self.detectorName,
         )
+        self._datastore.add_log_message(
+            "LoggerTableDefinitions",
+            pprint.pformat(self.table_def),
+            detector_name=self.detectorName,
+        )
         fname = str(progstat["ProgName"], "utf-8")
         data_file = str(self._datalogger.getfile(fname), "utf-8")
         self._datastore.add_log_message(
