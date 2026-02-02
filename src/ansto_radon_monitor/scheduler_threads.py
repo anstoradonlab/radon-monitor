@@ -1511,6 +1511,8 @@ class DataLoggerThread(DataThread):
             for data in self._datalogger.get_data_generator(
                 table_name, start_date=update_time, stop_date=stop_date
             ):
+                # --> this is the anomalous behaviour.  With datalogger set to UTC+1, RTV with only
+                # one row in the table, CR800, then get_data_generator does not fire
                 flag_get_data_generator_fired = True
                 # return early if another task is trying to execute
                 # (likely this is a shutdown request)
@@ -1544,12 +1546,13 @@ class DataLoggerThread(DataThread):
             # work around a problem where the first update from RTV does not 
             # happen (on some occasions, for reasons unknown), by using the 
             # low-level 'collect all' functionality
-            if (flag_table_does_not_yet_exist 
-                    and not flag_get_data_generator_fired 
+            flag_one_row_in_table = self.get_table_size(table_name) == 1
+            if (flag_one_row_in_table 
+                    and not flag_get_data_generator_fired
                     and table_name == "RTV"):
                 
                 msg = f"Attempting to retrieve all data from table: {table_name}"
-                _logger.info(msg)
+                _logger.debug(msg)
                 data = ListDict()
                 # using None and None triggers the 'collect all' command
                 # Note: the `more` flag is ignored - more data will be
@@ -1561,14 +1564,35 @@ class DataLoggerThread(DataThread):
                 # we've used the low-level function we need to do it here
                 for rec in response:
                     for item in rec['RecFrag']:
-                        new_rec = Dict()
+                        new_rec = dict()
                         new_rec["Datetime"] = item['TimeOfRec']
                         new_rec["RecNbr"] = item['RecNbr']
                         for key in item['Fields']:
-                            new_rec["%s" % key] = item['Fields'][key]
+                            new_rec[str(key, encoding="ascii")] = item['Fields'][key]
                         data.append(new_rec)
 
-                self._datastore.add_records(destination_table_name, data)
+                data = [fix_record(itm, time_offset) for itm in data]
+                for itm in data:
+                    itm["DetectorName"] = self._config.name
+
+                with self._lock:
+                        flag_new = True
+                        for itm in data:
+                            for itm2 in self._rtv_buffer:
+                                if itm == itm2:
+                                    flag_new = False
+                                    msg = f"Retrieved data from {table_name} which already exists"
+                                    _logger.debug(msg)
+                                
+                if flag_new:
+                    msg = f"Retrieved new data from {table_name}"
+                    _logger.debug(msg)
+                    with self._lock:
+                        for itm in data:
+                            if table_name == "RTV":
+                                self._rtv_buffer.append(itm)
+
+                        self._datastore.add_records(destination_table_name, data)
 
 
         self.status["link"] = "connected"
@@ -1740,6 +1764,32 @@ class DataLoggerThread(DataThread):
         title = self.detectorName + " Radon Detector"
         html = status_as_html(title, info)
         return html
+
+    def get_table_size(self, table_name):
+        """return true if the table `table_name` has only one row in its table, according to the
+        table definitions
+
+        Returns None if table definitions are not yet ready or if the table is not found"""
+        if self.table_def is None:
+            return None
+        
+        # table def has entries something like:
+        # [ {...,
+        #   'Header': {'TableName': b'RTV',
+        #      'TableSize': 1,
+        #      'TblInterval': (10, 0),
+        #      'TblTimeInto': (0, 0),
+        #      'TimeType': 14},
+        #   ...,
+        #}, {...}, {...} ]
+        for entry in self.table_def:
+            if str(entry["Header"]["TableName"], "ascii") == table_name:
+                return entry["Header"]["TableSize"]
+
+        return None
+
+
+
 
     def log_status(self):
         progstat = self._datalogger.getprogstat()
