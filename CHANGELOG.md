@@ -1,5 +1,16 @@
 # Changelog
 
+## Version 10.19
+
+2 February 2026
+
+ - Handle calibration system with three radon detectors
+ - Log the datalogger table definitions during startup
+ - Special case handling for the RTV table when it contains only one
+   data record, because the gemeral-case data download code can sometimes
+   fail to retrieve any data (seemingly, only if the datalogger timezone is set to something other than UTC)
+
+
 ## Version 10.18
 
 11 August 2025
