@@ -1512,6 +1512,8 @@ class DataLoggerThread(DataThread):
                 # return early if another task is trying to execute
                 # (likely this is a shutdown request)
                 if self.state_changed.is_set():
+                    msg = f"Stopping measurement function early because another task has signalled"
+                    _logger.debug(msg)
                     return
                 # it is Ok for this to take a long time to run - datalogger is slow
                 # Note: I considered breaking out of the loop early after e.g. 5 seconds so that the other
