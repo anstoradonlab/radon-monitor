@@ -1493,6 +1493,13 @@ class DataLoggerThread(DataThread):
                 # convert from UTC (all timestamps in database are UTC) into
                 # the datalogger's timezone (usually UTC, but sometimes not)
                 update_time = update_time + time_offset
+            else:
+                # There is not yet any data in the database for this table
+                if table_name == "RTV":
+                    # only go back two days for RTV data when requesting from the datalogger
+                    # (Attempting to work around an issue where the datalogger returns no data
+                    # when trying to get RTV data)
+                    update_time = datetime.datetime.utcnow().replace(second=0, microsecond=0) - datetime.timedelta(days=2)
             total_num_records = 0
             # set stop date to a time in the future (because of the possibility that
             # datalogger timezone doesn't match the computer timezone)
