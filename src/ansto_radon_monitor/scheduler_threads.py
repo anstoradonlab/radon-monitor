@@ -1485,6 +1485,7 @@ class DataLoggerThread(DataThread):
             update_time = self._datastore.get_update_time(
                 destination_table_name, self.detectorName
             )
+            flag_table_does_not_yet_exist = update_time is None
             if update_time is not None:
                 # offset a little so that we don't grab the same record again and again
                 update_time += datetime.timedelta(seconds=1)
@@ -1506,9 +1507,11 @@ class DataLoggerThread(DataThread):
             stop_date = datetime.datetime.utcnow() + datetime.timedelta(days=2)
             msg = f"table_name = {table_name}, start_date = {update_time}, stop_date = {stop_date}"
             _logger.debug(msg)
+            flag_get_data_generator_fired = False
             for data in self._datalogger.get_data_generator(
                 table_name, start_date=update_time, stop_date=stop_date
             ):
+                flag_get_data_generator_fired = True
                 # return early if another task is trying to execute
                 # (likely this is a shutdown request)
                 if self.state_changed.is_set():
@@ -1537,6 +1540,36 @@ class DataLoggerThread(DataThread):
                                 self._rtv_buffer.append(itm)
 
                         self._datastore.add_records(destination_table_name, data)
+            
+            # work around a problem where the first update from RTV does not 
+            # happen (on some occasions, for reasons unknown), by using the 
+            # low-level 'collect all' functionality
+            if (flag_table_does_not_yet_exist 
+                    and not flag_get_data_generator_fired 
+                    and table_name == "RTV"):
+                
+                msg = f"Attempting to retrieve all data from table: {table_name}"
+                _logger.info(msg)
+                data = ListDict()
+                # using None and None triggers the 'collect all' command
+                # Note: the `more` flag is ignored - more data will be
+                # collected on the next iteration
+                response, _more = self._datalogger._collect_data(table_name, 
+                                                            start_date=None, 
+                                                            stop_date=None)
+                # this usually happens in get_data_generator, but since
+                # we've used the low-level function we need to do it here
+                for rec in response:
+                    for item in rec['RecFrag']:
+                        new_rec = Dict()
+                        new_rec["Datetime"] = item['TimeOfRec']
+                        new_rec["RecNbr"] = item['RecNbr']
+                        for key in item['Fields']:
+                            new_rec["%s" % key] = item['Fields'][key]
+                        data.append(new_rec)
+
+                self._datastore.add_records(destination_table_name, data)
+
 
         self.status["link"] = "connected"
 
