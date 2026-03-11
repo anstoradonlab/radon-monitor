@@ -1905,10 +1905,10 @@ if __name__ == "__main__":
         print(dict(row))
 
     #%%
-    ds.archive_data(".\data-archive-test")
+    ds.archive_data("./data-archive-test")
 
     #%%
-    ds.backup_active_database(".\data-archive-test")
+    ds.backup_active_database("./data-archive-test")
 
     #%%
     if False:
