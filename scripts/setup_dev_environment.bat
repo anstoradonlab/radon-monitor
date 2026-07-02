@@ -3,7 +3,9 @@ cd ..
 del /f /Q /S venv
 
 Rem create a minimal environment containing Python and some dev. extensions
-call conda create -y --prefix ./venv python=3.11 pip nsis=3 black isort
+Rem For the devel environment, it works better to use the conda PyQt
+Rem package, so get this here too...
+call conda create -y --prefix ./venv python=3.11 pip nsis=3 black isort pyqt~=5.9 pyqtgraph pywin32
 
 Rem Activate the environment
 call conda activate ./venv
