@@ -1,5 +1,15 @@
 # Changelog
 
+## Version 10.20
+
+2 July 2026
+
+ - Increase maximum limits (to 9999 hrs) for the duration of calibration,
+   background, and flush so that users can easily put the instrument into 
+   one of these states for a long period of time.
+
+
+
 ## Version 10.19
 
 2 February 2026
