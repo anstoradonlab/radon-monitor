@@ -13,9 +13,9 @@ jobs:
     runs-on: Windows-2022
 
     steps:
-    - uses: actions/checkout@v4.1.1
+    - uses: actions/checkout@v7
     - name: Set up Python 3.11
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: 3.11
     - name: Install dependencies
@@ -34,19 +34,19 @@ jobs:
       run: |
         pyinstaller --noconfirm src/RDM.spec
     - name: Upload zip
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
           name: RDM_no_installer
           path: dist/RDM
     - name: Create installer
-      uses: joncloud/makensis-action@v4
+      uses: joncloud/makensis-action@v5
       with:
           script-file: "Installer.nsi"
     - name: Rename installer file
       run: |
         mv dist/RDMSetup.exe dist/RDMSetup-${{github.ref_name}}.exe
     - name: Upload installer
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
           name: RDMSetup-${{github.ref_name}}.exe
           path: dist/RDMSetup-${{github.ref_name}}.exe
