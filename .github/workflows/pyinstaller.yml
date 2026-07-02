@@ -39,7 +39,7 @@ jobs:
           name: RDM_no_installer
           path: dist/RDM
     - name: Create installer
-      uses: joncloud/makensis-action@v5
+      uses: joncloud/makensis-action@v5.0
       with:
           script-file: "Installer.nsi"
     - name: Rename installer file
