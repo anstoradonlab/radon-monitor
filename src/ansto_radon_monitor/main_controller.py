@@ -109,7 +109,14 @@ def initialize(configuration: Configuration, mode: str = "thread"):
     elif mode == "thread":
         # MainController spawns threads as required to avoid blocking,
         # just return the controller object
-        controller = MainController(configuration)
+
+        # on posix systems, in thread mode, pass over management of the lock file 
+        # to the MainController object
+        if os.name == "posix":
+            manage_pidfile = True
+        else:
+            manage_pidfile = False
+        controller = MainController(configuration, manage_pidfile=manage_pidfile)
         return controller
 
     elif mode == "daemon" and os.name != "posix":
@@ -231,7 +238,7 @@ class MonitorThread(threading.Thread):
 
 
 class MainController(object):
-    def __init__(self, configuration: Configuration):
+    def __init__(self, configuration: Configuration, manage_pidfile=False):
         self._thread_list_lock = threading.RLock()
         try:
             self.datastore = DataStore(configuration)
@@ -251,6 +258,10 @@ class MainController(object):
         # a publicly accessible flag to indicate whether or not there is a calibration
         # unit present
         self.has_calibration_unit = False
+        self._fname_pidfile = None
+        self._manage_pidfile = manage_pidfile
+        if manage_pidfile:
+            self._lock_pidfile()
         try:
             self._start_threads()
             self.datastore.add_log_message("SystemEvent", "Startup")
@@ -321,6 +332,61 @@ class MainController(object):
         with self._thread_list_lock:
             for itm in self._threads:
                 itm.start()
+        
+    def _lock_pidfile(self):
+
+        # If Daemonize is not being used on this invocation, then the lockfile should be managed ourselves
+        # This happens when running in gui mode on posix systems
+        # * In cli mode, Daemonize manages the pid file
+        # * On Windows, cli is unused, so we can rely on the GUI lock
+        #
+        # This code is from Daemonize.start
+
+        pid = None
+        self._fname_pidfile = None
+        self._lockfile = None
+        if os.name == "posix":
+            import fcntl
+            pid = self._configuration.pid_file
+            # If pidfile already exists, we should read pid from there; to overwrite it, if locking
+            # will fail, because locking attempt somehow purges the file contents.
+            if os.path.isfile(pid):
+                with open(pid, "r") as old_pidfile:
+                    old_pid = old_pidfile.read()
+            # Create a lockfile so that only one instance of this daemon is running at any time.
+            try:
+                lockfile = open(pid, "w")
+            except IOError:
+                print("Unable to create the pidfile.")
+                sys.exit(1)
+            try:
+                # Try to get an exclusive lock on the file. This will fail if another process has the file
+                # locked.
+                fcntl.flock(lockfile, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except IOError:
+                print("Unable to lock on the pidfile.")
+                # We need to overwrite the pidfile if we got here.
+                with open(pid, "w") as pidfile:
+                    pidfile.write(old_pid)
+                sys.exit(1)
+
+            _logger.info(f"Using lock file: {pid}")
+
+            try:
+                lockfile.write("%s" % (os.getpid()))
+                lockfile.flush()
+            except IOError:
+                self.logger.error("Unable to write pid to the pidfile.")
+                print("Unable to write pid to the pidfile.")
+                sys.exit(1)
+
+        self._fname_pidfile = pid
+        self._lockfile = lockfile
+
+    def _unlock_pidfile(self):
+        if self._fname_pidfile is not None:
+            os.remove(self._fname_pidfile)
+
 
     def shutdown(self):
         """
@@ -375,6 +441,8 @@ class MainController(object):
         for itm in threading.enumerate():
             if not (itm == threading.main_thread() or itm == threading.current_thread()):
                 _logger.error(f"A thread is still alive after shutdown: {itm}")
+
+        self._unlock_pidfile()
         
 
     def shutdown_and_exit(self):
