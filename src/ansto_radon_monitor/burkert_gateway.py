@@ -4,7 +4,7 @@ from pymodbus.exceptions import ConnectionException
 import time
 import logging
 import traceback
-from typing import Dict, Any, List, Optional
+from typing import Any, Optional
 
 
 from .calbox_device import CalboxDevice
@@ -171,7 +171,7 @@ class BurkertGateway(CalboxDevice):
                 time.sleep(self.RETRY_WAIT_INTERVAL)
 
 
-    def _read_flags_worker(self) -> List[bool]:
+    def _read_flags_worker(self) -> list[bool]:
         resp = self._client.read_coils(self.DIGITAL_IO_ADDRESS, count=8)
         # sometimes, perhaps also depending on the version of modbus lib,
         # the response can be an exception
@@ -180,7 +180,7 @@ class BurkertGateway(CalboxDevice):
         resp_list = list(resp.bits)[: self.NUM_DIO]
         return resp_list
     
-    def _read_flags(self) -> List[bool]:
+    def _read_flags(self) -> list[bool]:
         """
         return flags (True means on) for
         [V1, V2, V3, V4, 
@@ -279,7 +279,7 @@ class BurkertGateway(CalboxDevice):
         return resp_list
 
 
-    def _set_flags_worker(self, flags: List[bool]):
+    def _set_flags_worker(self, flags: list[bool]):
         assert len(flags) == self.NUM_DIO
         assert threading.get_ident() == self._thread_id
         flags_to_send = list(flags) + [False] * (8 - self.NUM_DIO)
@@ -289,12 +289,12 @@ class BurkertGateway(CalboxDevice):
         _ = resp.address
         _ = resp.count
 
-    def _set_flags(self, flags: List[bool]):
+    def _set_flags(self, flags: list[bool]):
         """Set DIO flags
 
         Parameters
         ----------
-        flags : List[bool]
+        flags : list[bool]
             List of boolean values, True is high (1)
         """
         for ii in range(self.NUM_RETRIES+1):
@@ -491,12 +491,12 @@ class BurkertGateway(CalboxDevice):
         self.reset_background()
 
     @property
-    def analogue_states(self) -> Dict[str, float]:
+    def analogue_states(self) -> dict[str, float]:
         data = self._read_values()
         return data
     
     @property
-    def digital_output_state(self) -> Dict[str, bool]:
+    def digital_output_state(self) -> dict[str, bool]:
         flags = self._read_flags()
         # flags as a dict
         fd = {k: v for k, v in zip(self.FLAG_NAMES, flags)}
@@ -504,7 +504,7 @@ class BurkertGateway(CalboxDevice):
 
 
     @property
-    def status(self) -> Dict[str, Any]:
+    def status(self) -> dict[str, Any]:
         """generate a human-readable status message based on DIO flags"""
         try:
             flags = self._read_flags()
@@ -512,7 +512,7 @@ class BurkertGateway(CalboxDevice):
             if not True in flags:
                 s = "Normal operation"
             else:
-                sl: List[str] = []
+                sl: list[str] = []
                 if fd["Inject1"]:
                     sl.append("Injecting from source into detector 1")
                 elif fd["Inject2"]:
@@ -528,7 +528,7 @@ class BurkertGateway(CalboxDevice):
 
                 s = ", ".join(sl)
 
-            status: Dict[str, Any] = {}
+            status: dict[str, Any] = {}
             status["message"] = s
             status["digital out"] = fd
             status["analogue in"] = self.analogue_states
