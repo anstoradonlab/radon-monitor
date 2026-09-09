@@ -393,7 +393,7 @@ class DataViewForm(QtWidgets.QWidget, Ui_DataViewForm):
             try:
                 header.resizeSections(QtWidgets.QHeaderView.ResizeToContents)
                 # if the column is too wide, narrow it down
-                for ii in header.count():
+                for ii in range(header.count()):
                     width = header.sectionSize(ii)
                     max_width = 400
                     if width > max_width:
