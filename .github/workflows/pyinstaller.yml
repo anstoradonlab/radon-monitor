@@ -2,6 +2,8 @@
 name: Pyinstaller/NSIS - create windows binary
 
 on:
+  workflow_dispatch:
+  
   push:
     tags:        
       - '**'    # Push events to every tag including hierarchical tags like v1.0/beta
