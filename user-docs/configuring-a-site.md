@@ -38,6 +38,48 @@ This is an outline of the steps required to set up `radon-monitor` on a new comp
     * Go to `View → Calibration` and enable scheduled calibrations
 7. Ensure RDM is set as a startup program
 
+## Linux, using `uv`
+
+The [uv](https://docs.astral.sh/uv/getting-started/installation/) package manager is currently the recommended way to install RDM on a linux machine.  It installs Python software into an isolated environment and avoids using the system Python interpreter, so there is a decent chance that RDM will work on both old and recent distributions.
+
+1. install uv, following [the instructions]((https://docs.astral.sh/uv/getting-started/installation/)).  TL;DR, try this:
+
+```sh
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+2. install the latest version of RDM as a `uv` tool
+
+```sh
+uv tool install --python 3.11 "ansto_radon_monitor[gui] @ git+https://github.com/anstoradonlab/radon-monitor.git"
+```
+
+Once the install has finished, if it works, you can:
+* check that the tool is installed, `uw tool list`
+* upgrade to a new version, `uw tool upgrade`
+* etc., see `uw tool --help`
+
+To check that the installation worked completely, run
+
+```sh
+radon-monitor -h
+```
+
+to test the command line interface, and 
+
+```sh
+radon-monitor gui
+```
+
+to test the GUI.
+
+3. To upgrade to the latest release, run
+
+```sh
+uv tool update ansto_radon_monitor
+```
+
+
 
 ## Linux, using a virtual environment, including Raspberry Pi
 
@@ -56,7 +98,7 @@ These instructions assume the following path names:
 sudo apt install python3-pyqt5 python3-numpy python3-msgpack python3-gevent
 ```
 
-2. Initialise and then activate a new virtual environment:  
+1. Initialise and then activate a new virtual environment:  
 ```sh
    python3 -m venv --system-site-packages ~/venv-rdm
    source ~/venv-rdm/bin/activate
@@ -67,7 +109,7 @@ sudo apt install python3-pyqt5 python3-numpy python3-msgpack python3-gevent
 python -m pip install  "ansto_radon_monitor[gui] @ git+https://github.com/anstoradonlab/radon-monitor.git@v10.17.0"
 ```
 
-4. Install the Labjack exodriver.  For Ubuntu or Raspberry Pi systems, execute these commands, or [read the full installation instructions](https://github.com/labjack/exodriver/blob/master/INSTALL.Linux):
+3. Install the Labjack exodriver (this is only necessary for the older calibration systems which contain a LabJack).  For Ubuntu or Raspberry Pi systems, execute these commands, or [read the full installation instructions](https://github.com/labjack/exodriver/blob/master/INSTALL.Linux):
 ```sh
 sudo apt install build-essential libusb-1.0-0-dev
 git clone https://github.com/labjack/exodriver.git
@@ -75,12 +117,12 @@ cd exodriver
 sudo ./install.sh
 ```
 
-3. You should now be able to test that the installation worked by running:  
+4. You should now be able to test that the installation worked by running:  
     `~/venv-rdm/bin/radon-monitor -h`
 
-4. At this point, the installation is complete.  You can now create a configuration file.  
+5. At this point, the installation is complete.  You can now create a configuration file.  
 
-5. If you are not using the GUI to schedule tasks, you can integrate the command-line controls with the system.  We can cheat by using cron jobs, for example run `crontab -e` and then set up something like this:
+6. If you are not using the GUI to schedule tasks, you can integrate the command-line controls with the system.  We can cheat by using cron jobs, for example run `crontab -e` and then set up something like this:
 
 ```bash
 # Try to start logging every 10 minutes.  This will fail immediately if there is
@@ -94,7 +136,7 @@ sudo ./install.sh
 0 0 20 */3 * /home/radon-logger/bin/radon-monitor -c /home/radon-logger/data/richmond-config.ini background
 
 ```
-6. When new versions of `radon-monitor` get released, upgrade using this command (replacing `X.xx.x` with the current version):
+7. When new versions of `radon-monitor` get released, upgrade using this command (replacing `X.xx.x` with the current version):
    `source ~/venv-rdm
    `python -m pip install --upgrade  "ansto_radon_monitor[gui] @ git+https://github.com/anstoradonlab/radon-monitor.git@vX.xx.x"`
 
