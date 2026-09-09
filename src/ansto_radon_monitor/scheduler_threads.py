@@ -531,13 +531,13 @@ class CalibrationUnitThread(DataThread):
                     # burkert-based, report ip address info
                     _logger.error(
                         "Unable to connect to calibration system using "
-                        f"IP address: {ip_address} because of error: {ex}.  Retrying in {self._reconnect_delay} sec."
+                        f"IP address: {ip_address} because of error: {ex}.  Retrying in {self._reconnect_delay} sec.  Backtrace: {traceback.format_exc()}"
                     )
                 else:
                     # labjack-based, report labjack info
                     _logger.error(
                         "Unable to connect to calibration system using "
-                        f"ID: {labjack_id} serial: {serialNumber} because of error: {ex}.  Retrying in {self._reconnect_delay} sec."
+                        f"ID: {labjack_id} serial: {serialNumber} because of error: {ex}.  Retrying in {self._reconnect_delay} sec.  Backtrace: {traceback.format_exc()}"
                     )
 
 
@@ -546,7 +546,7 @@ class CalibrationUnitThread(DataThread):
         try:
             self._device.flush()
             self._datastore.add_log_message(
-                "CalibrationEvent", f"Began flushing radon calibration source"
+                "CalibrationEvent", "Began flushing radon calibration source"
             )
         except Exception as ex:
             _logger.error(

@@ -1,7 +1,5 @@
 import threading
-from pymodbus.client.sync import ModbusTcpClient
-from pymodbus.payload import BinaryPayloadDecoder, BinaryPayloadBuilder
-from pymodbus.constants import Endian, Defaults
+from pymodbus.client import ModbusTcpClient
 from pymodbus.exceptions import ConnectionException
 import time
 import logging
@@ -26,7 +24,6 @@ class BurkertGateway(CalboxDevice):
     DIGITAL_IO_ADDRESS = 0
     NUM_DIO = 8  # number of DIO lines (coils, in modbus terms)
     MFC_DEFAULT_FLOW = 0.5 # L/min
-    BYTEORDER = {"byteorder":Endian.Big, "wordorder":Endian.Big}
     NUM_RETRIES = 10
     RETRY_WAIT_INTERVAL = 0.1
 
@@ -87,7 +84,7 @@ class BurkertGateway(CalboxDevice):
         9           2           Float          MFC used set-point value (l/min at STP)
 
         Read-write registers (modbus FC03 to read, FC016 to write, pymodbus
-          client.read_holding_registers, client.write_registers )
+          client.read_holding_registers, count = client.write_registers )
         Address     Length      Datatype       Name
         2           2           Float          MFC flow rate set point (l/min at STP, aka Nl/min)
 
@@ -132,7 +129,7 @@ class BurkertGateway(CalboxDevice):
             for ii in range(10):
                 connected = self._client.connect()
                 if connected:
-                    _logger.info(f"Connected to modbus server, socket: {self._client.socket.getsockname()}")
+                    _logger.info(f"Connected to modbus server, local socket: {self._client.socket.getsockname()}")
                     break
                 time.sleep(0.1)
                 
@@ -155,9 +152,8 @@ class BurkertGateway(CalboxDevice):
             raise
 
     def _set_mfc_flowrate_worker(self, setpoint_lpm):
-        builder = BinaryPayloadBuilder(**self.BYTEORDER)
-        builder.add_32bit_float(setpoint_lpm)
-        payload = builder.to_registers()
+        dtype = self._client.DATATYPE.FLOAT32
+        payload = self._client.convert_to_registers(setpoint_lpm, data_type=dtype)
         self._client.write_registers(self.MFC_SETPOINT_ADDRESS, payload)
 
 
@@ -176,11 +172,11 @@ class BurkertGateway(CalboxDevice):
 
 
     def _read_flags_worker(self) -> List[bool]:
-        resp = self._client.read_coils(self.DIGITAL_IO_ADDRESS, 8)
+        resp = self._client.read_coils(self.DIGITAL_IO_ADDRESS, count=8)
         # sometimes, perhaps also depending on the version of modbus lib,
         # the response can be an exception
-        if issubclass(type(resp), Exception):
-            _logger.error(f"Modbus error {resp}")
+        if resp.isError():
+            _logger.error(f"Modbus error: {resp}")
         resp_list = list(resp.bits)[: self.NUM_DIO]
         return resp_list
     
@@ -215,21 +211,24 @@ class BurkertGateway(CalboxDevice):
 
         for addr, count, name in address_count_name:
             result = self._client.read_input_registers(addr, count=count)
-            if issubclass(type(result), Exception):
-                raise result
+            if result.isError():
+                raise RuntimeError(f"Modbus eror: {result}")
             if count == 2:
-                decoder = BinaryPayloadDecoder.fromRegisters(result.registers, **self.BYTEORDER)
-                decoded_val = decoder.decode_32bit_float()
+                decoded_val = self._client.convert_from_registers(
+                    result.registers, 
+                    data_type=self._client.DATATYPE.FLOAT32)
             elif count == 1:
-                decoder = BinaryPayloadDecoder.fromRegisters(result.registers, **self.BYTEORDER)
-                decoded_val = decoder.decode_16bit_uint()
+                decoded_val = self._client.convert_from_registers(
+                    result.registers, 
+                    data_type=self._client.DATATYPE.UINT16)
 
             data[name] = decoded_val
 
         # MFC set point is read/write and accessed with a different function
-        result = self._client.read_holding_registers(2, 2)
-        decoder = BinaryPayloadDecoder.fromRegisters(result.registers, **self.BYTEORDER)
-        decoded_val = decoder.decode_32bit_float()
+        result = self._client.read_holding_registers(2, count=2)
+        decoded_val = self._client.convert_from_registers(
+                    result.registers, 
+                    data_type=self._client.DATATYPE.FLOAT32)
         data["MfcSetPoint"] = decoded_val
 
         return data
@@ -252,15 +251,15 @@ class BurkertGateway(CalboxDevice):
 
 
     def _read_constant_values_worker(self):
-        add_count_name_decoderfunc = [
-            (849, 2, "Serial Number", lambda x: x.decode_32bit_uint()),
-            (821, 10, "Device Name", lambda x: x.decode_string(10)),
+        add_count_name_dtype = [
+            (849, 2, "Serial Number", self._client.DATATYPE.UINT32),
+            (821, 10, "Device Name", self._client.DATATYPE.STRING),
         ]
         data = {}
-        for addr, count, name, decoderfunc in add_count_name_decoderfunc:
+        for addr, count, name, dtype in add_count_name_dtype:
             result = self._client.read_holding_registers(addr, count=count)
-            decoder = BinaryPayloadDecoder.fromRegisters(result.registers, **self.BYTEORDER)
-            decoded_val = decoderfunc(decoder)
+            decoded_val = self._client.convert_from_registers(result.registers, 
+                                                              dtype)
             data[name] = decoded_val
         return data
 
@@ -272,7 +271,7 @@ class BurkertGateway(CalboxDevice):
             try:
                 resp_list = self._read_constant_values_worker()
                 break
-            except:
+            except Exception:
                 if ii == self.NUM_RETRIES:
                     raise
                 time.sleep(self.RETRY_WAIT_INTERVAL)
@@ -281,7 +280,6 @@ class BurkertGateway(CalboxDevice):
 
 
     def _set_flags_worker(self, flags: List[bool]):
-        """ """
         assert len(flags) == self.NUM_DIO
         assert threading.get_ident() == self._thread_id
         flags_to_send = list(flags) + [False] * (8 - self.NUM_DIO)
