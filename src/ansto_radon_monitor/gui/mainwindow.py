@@ -267,8 +267,6 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                     # but also 'cal_active' should always be false
                     cal_active = False
             except Exception as ex:
-                import traceback
-
                 msg = traceback.format_exc()
                 _logger.error(msg)
 
@@ -503,8 +501,6 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         try:
             config = config_from_inifile(config_fname)
         except Exception as ex:
-            import traceback
-
             _logger.warning(
                 f"Exception occured while trying to load configuration: {ex}, {traceback.format_exc()}"
             )
