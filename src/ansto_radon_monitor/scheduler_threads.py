@@ -18,7 +18,7 @@ import traceback
 import typing
 from ftplib import FTP
 from pathlib import Path
-from typing import Dict
+from typing import Optional
 
 import numpy as np
 import serial
@@ -806,7 +806,7 @@ class CalibrationUnitThread(DataThread):
     def run_background(
         self,
         duration: float,
-        start_time: datetime.datetime = None,
+        start_time: Optional[datetime.datetime] = None,
         detector_idx: int = 0,
     ):
         """Run the calibration sequence - flush source, inject source
@@ -1083,20 +1083,20 @@ class CalibrationUnitThread(DataThread):
 
 
 def fix_record(
-    record: Dict, time_offset: datetime.timedelta = datetime.timedelta(seconds=0)
+    record: dict, time_offset: datetime.timedelta = datetime.timedelta(seconds=0)
 ):
     """fix a record from cr1000
 
     Parameters
     ----------
-    record : Dict
+    record : dict
         Data record
     time_offset : datetime.timedelta, optional
         Time offset, subtracted from record, by default datetime.timedelta(seconds=0)
 
     Returns
     -------
-    Dict
+    dict
         Data record, with time offset removed, timezone info added, and
         some "Bytes" issues fixed
     """
