@@ -1,7 +1,7 @@
 # A dialog box with a time-out ("Closing in N seconds...")
 
 
-from PyQt5 import QtCore, QtGui, QtWidgets
+from PySide6 import QtCore, QtWidgets
 
 
 class TimeoutDialog(QtWidgets.QDialog):

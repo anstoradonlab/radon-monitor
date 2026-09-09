@@ -20,19 +20,14 @@ from ansto_radon_monitor.main_controller import MainController, initialize
 from .c_and_b import CAndBForm
 from .data_plotter import DataPlotter
 from .data_view import DataViewForm
-from PyQt5 import QtCore, QtGui, QtWidgets, uic
-# from PyQt5.QtWidgets import QMainWindow
-from PyQt5.QtCore import QSettings, Qt, QTimer
+from PySide6 import QtCore, QtGui, QtWidgets
+from PySide6.QtCore import QSettings, Qt, QTimer
 from .sensitivity_sweep import SensitivitySweepForm
 from .system_information import SystemInformationForm
 from .timeout_dialog import TimeoutDialog
 from .ui_mainwindow import Ui_MainWindow
 from .task_status_dialog import TaskStatusDialog
 from .calibration_history_dialog import CalibrationHistoryDialog
-
-# import sip after other PyQt modules so that we pick up the internal copy of sip
-# https://www.riverbankcomputing.com/static/Docs/PyQt5/incompatibilities.html
-import sip
 
 # import pandas as pd
 # import tabulate
@@ -53,7 +48,7 @@ _logger = logging.getLogger(__name__)
 
 # small class for our 'log message' signal to live in
 class QTextEditLogger(logging.Handler, QtCore.QObject):
-    appendPlainText = QtCore.pyqtSignal(str)
+    appendPlainText = QtCore.Signal(str)
 
     def __init__(self, widget):
         super().__init__()
@@ -112,7 +107,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
     # a signal which gets emitted when new data arrives
     # arguments are table_name, data
-    data_update = QtCore.pyqtSignal(str, object)
+    data_update = QtCore.Signal(str, object)
     application_name = "RDM"
 
     def __init__(self, *args, **kwargs):
@@ -149,9 +144,6 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.data_plotter = None
         # cache of data for multi-panel plot
         self.plot_data = None
-
-        # Load the UI Page
-        # uic.loadUi(appctxt.get_resource("main_window.ui"), baseinstance=self)
 
         self.maintenanceModeFrame.setVisible(False)
         self.alertFrame.setVisible(False)
@@ -626,7 +618,6 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                 if not txt in tables:
                     data_view = tabwidget.widget(idx)
                     tabwidget.removeTab(idx)
-                    sip.delete(data_view)
                 else:
                     self.configured_tables.append(txt)
                     idx += 1
@@ -643,10 +634,10 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         """reset all widgets in the main window to (about) their initial state"""
         tabwidget = self.tabWidget
         # remove all tabs
-        while len(tabwidget) > 0:
+        while tabwidget.count() > 0:
             widget = tabwidget.widget(0)
             tabwidget.removeTab(0)
-            sip.delete(widget)
+            del widget
         self.configured_tables = []
         # for visual purposes
         lab = QtWidgets.QLabel("")
@@ -685,8 +676,7 @@ def dark_palette():
     # also, works best in 'fusion' style
     app.setStyle("Fusion")
     """
-    from PyQt5.QtCore import Qt
-    from PyQt5.QtGui import QColor, QPalette
+    from PySide6.QtGui import QColor, QPalette
 
     darkPalette = QPalette()
     darkPalette.setColor(QPalette.Window, QColor(53, 53, 53))

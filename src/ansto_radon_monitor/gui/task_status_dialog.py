@@ -2,10 +2,9 @@
 # This does not use QT Designer
 
 
-from PyQt5.QtCore import QTimer
-from PyQt5 import QtWidgets, QtCore
-from PyQt5 import uic
-from PyQt5.QtCore import Qt
+from PySide6.QtCore import QTimer
+from PySide6 import QtWidgets, QtCore
+from PySide6.QtCore import Qt
 
 import sys
 import datetime
@@ -99,9 +98,23 @@ class TaskStatusWidget(QtWidgets.QWidget):
         self.tableView.setModel(self.model)
         self.tableView.verticalHeader().hide()
         self.layout.addWidget(self.tableView)
+        self.have_data = False
     
     def update_data(self, data):
         self.model.update_data(data)
+        # run this only for the first data update
+        if not self.have_data:
+            self.have_data = True
+            # set the first column in the table (the Datetime column) to resize to fit its data
+            header = self.tableView.horizontalHeader()
+            try:
+                header.resizeSections(QtWidgets.QHeaderView.ResizeToContents)
+            except Exception as ex:
+                print(ex)
+                import traceback
+                traceback.print_exc()
+
+
     
 
 class TaskStatusDialog(QtWidgets.QDialog):

@@ -7,8 +7,8 @@ from typing import Dict
 import numpy as np
 import pyqtgraph as pg
 from .plotutils import groupby_series
-from PyQt5 import QtCore, QtWidgets
-from PyQt5.QtCore import QSettings, Qt, QTimer
+from PySide6 import QtCore, QtWidgets
+from PySide6.QtCore import QSettings, Qt, QTimer
 from pyqtgraph import PlotWidget
 from .ui_data_view import Ui_DataViewForm
 
@@ -45,11 +45,11 @@ class TableModel(QtCore.QAbstractTableModel):
             # Default (anything not captured above: e.g. int)
             return str(value)
 
-    def rowCount(self, index):
+    def rowCount(self, index=0):
         # The length of the outer list.
         return len(self._data)
 
-    def columnCount(self, index):
+    def columnCount(self, index=0):
         # The following takes the first dict, and returns
         # the length (only works if all rows are an equal length)
         if len(self._data) > 0:
@@ -172,6 +172,7 @@ class DataViewForm(QtWidgets.QWidget, Ui_DataViewForm):
                 import traceback
                 traceback.print_exc()
 
+        self.columns_have_been_sized: bool = False
 
         self.plot_series = []
 
@@ -384,6 +385,23 @@ class DataViewForm(QtWidgets.QWidget, Ui_DataViewForm):
         if len(newdata) > 0:
             self.flag_new_plot_data = True
 
+        # if there is now data in the table, resize the columns to fit
+        # just do this once, so users can change it later
+        if not self.columns_have_been_sized and self.model.rowCount() > 0:
+            self.columns_have_been_sized = True
+            header = self.pastDataTableView.horizontalHeader()
+            try:
+                header.resizeSections(QtWidgets.QHeaderView.ResizeToContents)
+                # if the column is too wide, narrow it down
+                for ii in header.count():
+                    width = header.sectionSize(ii)
+                    max_width = 400
+                    if width > max_width:
+                        header.resizeSection(ii, max_width)
+            except Exception as ex:
+                import traceback
+                traceback.print_exc()
+
         if t is not None:
             self.last_update_time = t
             # use the database rowid as the reference, rather than taking the
@@ -395,19 +413,6 @@ class DataViewForm(QtWidgets.QWidget, Ui_DataViewForm):
             self.model.append_data(newdata)
             if scroll_bar_at_bottom or first_run:
                 self.autoScroll()
-            
-            # this is disabled because sometimes RDM produces a table without any data
-            # in it, which crashes the program.  We shall re-enable when we get this working
-            # (needs a check for empty data tables)
-            if first_run and False:
-                # set the first column in the table (the Datetime column) to resize to fit its data
-                header = self.pastDataTableView.horizontalHeader()
-                try:
-                    header.setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeToContents)
-                except Exception as ex:
-                    import traceback
-                    traceback.print_exc()
-
 
         # TODO: link to plot data, or somehow avoid copying the entire
         # x/y series each time

@@ -5,7 +5,7 @@ import time
 import serial.tools.list_ports
 from ansto_radon_monitor.labjack_interface import list_all_u12
 from pycampbellcr1000 import CR1000
-from PyQt5 import QtCore, QtWidgets
+from PySide6 import QtCore, QtWidgets
 from .ui_system_information import Ui_SystemInformationForm
 
 
@@ -140,9 +140,9 @@ class SystemInformationForm(QtWidgets.QWidget, Ui_SystemInformationForm):
                 k = info.device
                 self._serial_port_info[k] = info
             serial_ports = list(self._serial_port_info.keys())
-            if not serial_ports == self.detected_serial_ports:
+            if serial_ports != self.detected_serial_ports:
                 self.detected_serial_ports = serial_ports
-                while len(self.serialPortComboBox) > 0:
+                while self.serialPortComboBox.count() > 0:
                     self.serialPortComboBox.removeItem(0)
                 self.serialPortComboBox.addItems(serial_ports)
                 self._n_com_ports = n

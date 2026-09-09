@@ -4,7 +4,7 @@ import traceback
 import os
 
 from ansto_radon_monitor.configuration import setup_logging
-from PyQt5 import QtCore, QtWidgets, QtGui
+from PySide6 import QtCore, QtWidgets, QtGui
 from .mainwindow import MainWindow
 
 basedir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))

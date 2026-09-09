@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import datetime
 
-from PyQt5 import QtWidgets
+from PySide6 import QtWidgets
 from .ui_cal_bg_start_time_widget import Ui_CalBgStartWidget
 
 
@@ -60,17 +60,17 @@ class CalBgStartWidget(QtWidgets.QWidget, Ui_CalBgStartWidget):
         Local time displays
         """
         t0_background = (
-            self.firstScheduledBackgroundDateTimeEdit.dateTime().toPyDateTime()
+            self.firstScheduledBackgroundDateTimeEdit.dateTime().toPython()
         )
         tstr = str(t_into_utc(t0_background).astimezone())
         self.bgLocalTimeLabel.setText(tstr)
-        t0_cal = self.firstScheduledCalibrationDateTimeEdit.dateTime().toPyDateTime()
+        t0_cal = self.firstScheduledCalibrationDateTimeEdit.dateTime().toPython()
         tstr = str(t_into_utc(t0_cal).astimezone())
         self.calLocalTimeLabel.setText(tstr)
 
     @property
     def cal_start_time(self):
-        t = self.firstScheduledCalibrationDateTimeEdit.dateTime().toPyDateTime()
+        t = self.firstScheduledCalibrationDateTimeEdit.dateTime().toPython()
         return t_into_utc(t)
 
     @cal_start_time.setter
@@ -80,7 +80,7 @@ class CalBgStartWidget(QtWidgets.QWidget, Ui_CalBgStartWidget):
 
     @property
     def bg_start_time(self):
-        t = self.firstScheduledBackgroundDateTimeEdit.dateTime().toPyDateTime()
+        t = self.firstScheduledBackgroundDateTimeEdit.dateTime().toPython()
         return t_into_utc(t)
 
     @bg_start_time.setter

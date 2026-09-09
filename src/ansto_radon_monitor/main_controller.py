@@ -700,8 +700,8 @@ class MainController(object):
 
     def set_maintenance_mode(self, mm_active):
         k = "Maintenance Mode"
-        mm_old = self.maintenance_mode
-        if not (mm_active == mm_old):
+        mm_old = self.get_maintenance_mode()
+        if mm_active != mm_old:
             _logger.info(f"Toggling maintenance mode from {mm_old} to {mm_active}")
             self.datastore.add_log_message("MaintenanceMode", mm_active)
             self.datastore.set_state(k, mm_active)

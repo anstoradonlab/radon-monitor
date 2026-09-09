@@ -5,7 +5,7 @@ import math
 import time
 
 from .cal_bg_start_time_widget import CalBgStartWidget
-from PyQt5 import QtCore, QtWidgets
+from PySide6 import QtCore, QtWidgets
 from .ui_c_and_b import Ui_CAndBForm
 
 _logger = logging.getLogger(__name__)
@@ -76,7 +76,7 @@ class CAndBForm(QtWidgets.QWidget, Ui_CAndBForm):
         if config is None:
             return
         container = self.cal_bg_start_times_layout
-        while len(container) > 0:
+        while container.count() > 0:
             container.removeWidget(container.children[0])
         self._tabwidget = QtWidgets.QTabWidget()
         container.addWidget(self._tabwidget)
@@ -166,7 +166,7 @@ class CAndBForm(QtWidgets.QWidget, Ui_CAndBForm):
         if self.startLaterCheckBox.isChecked():
             start_time = (
                 self.calbgDateTimeEdit.dateTime()
-                .toPyDateTime()
+                .toPython()
                 .replace(tzinfo=datetime.timezone.utc)
             )
         else:
@@ -223,7 +223,7 @@ class CAndBForm(QtWidgets.QWidget, Ui_CAndBForm):
         self.update_main_display()
 
     def update_local_times(self):
-        t0_single = self.calbgDateTimeEdit.dateTime().toPyDateTime()
+        t0_single = self.calbgDateTimeEdit.dateTime().toPython()
         tstr = str(t_into_utc(t0_single).astimezone())
         self.calbgLocalTimeLabel.setText(tstr)
 
@@ -361,7 +361,7 @@ class CAndBForm(QtWidgets.QWidget, Ui_CAndBForm):
         if self.startLaterCheckBox.isChecked():
             start_time = (
                 self.calbgDateTimeEdit.dateTime()
-                .toPyDateTime()
+                .toPython()
                 .replace(tzinfo=datetime.timezone.utc)
             )
         else:
@@ -384,7 +384,7 @@ class CAndBForm(QtWidgets.QWidget, Ui_CAndBForm):
         if self.startLaterCheckBox.isChecked():
             start_time = (
                 self.calbgDateTimeEdit.dateTime()
-                .toPyDateTime()
+                .toPython()
                 .replace(tzinfo=datetime.timezone.utc)
             )
         else:
@@ -507,17 +507,20 @@ class CAndBForm(QtWidgets.QWidget, Ui_CAndBForm):
     
         # There appears to be a race between the Python object being 
         # destroyed and the underlying C++ QTimer object
-        try:
-            tmp = self.redraw_timer.parent()
-            del tmp
-        except RuntimeError:
-            # the C++ redraw timer object has already been deleted,
-            # so there's nothing to do.
-            # print("*** Cleanup doing nothing")
-            return
+        #
+        #  Let's assume that upgrading to Pyside6 fixed this?
+        if False:
+            try:
+                tmp = self.redraw_timer.parent()
+                del tmp
+            except RuntimeError:
+                # the C++ redraw timer object has already been deleted,
+                # so there's nothing to do.
+                # print("*** Cleanup doing nothing")
+                return
 
-        # print("*** Cleanup running disconnect")
-        # The C++ redraw timer exists, so disconnect from it to prevent
-        # the callback trying to execute a non-existant function
-        self.redraw_timer.disconnect()
-        self.redraw_timer.deleteLater()
+            # print("*** Cleanup running disconnect")
+            # The C++ redraw timer exists, so disconnect from it to prevent
+            # the callback trying to execute a non-existant function
+            self.redraw_timer.disconnect()
+            self.redraw_timer.deleteLater()

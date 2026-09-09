@@ -2,13 +2,9 @@
 # This does not use QT Designer
 
 
-from PyQt5.QtCore import QTimer
-from PyQt5 import QtWidgets, QtCore
-from PyQt5 import uic
-from PyQt5.QtCore import Qt
+from PySide6 import QtWidgets
 import pyqtgraph as pg
 
-import sys
 import datetime
 
 
